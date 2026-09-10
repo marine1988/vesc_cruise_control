@@ -1,6 +1,7 @@
 # VESC Cruise Control
-Cruise control for a VESC without a display. Hold the throttle steady for the hold time and
-the scooter keeps the speed, brake or move the throttle to cancel it.
+Cruise control and a legal lock for a VESC without a display. Hold the throttle steady for the
+hold time and the scooter keeps the speed, brake or move the throttle to cancel it. Stopped
+with the brake held, two throttle blips limit speed and power for riding where that is required.
 
 Settings are made in the App UI and stored in the VESC, so nothing has to be reflashed when
 they change.
@@ -29,11 +30,25 @@ Throttle to ADC1, brake to ADC2 of the VESC, both against GND. The values below 
 on those pins.
 
 ## Settings
-- **Cruise Control**: turns the whole thing on or off
+- **Cruise Control**: turns the cruise control on or off
 - **Hold Time (s)**: how long the throttle has to stay steady before cruise engages
 - **Deadband (V)**: how much throttle jitter still counts as steady. Raise it if cruise does not engage
 - **Min Speed (km/h)**: cruise does not engage below this speed
 - **Max Speed (km/h)**: cruise does not engage above this speed. If the speed goes above it while cruising, cruise stays on
+- **Legal Speed (km/h)** and **Legal Power (W)**: what the legal lock limits the scooter to
+
+## Legal lock
+Stopped with the brake held, twist the throttle out twice. The motor beeps twice and the speed
+and the power are limited to the values in the settings. Do the same gesture again to go back to
+the normal limits, the motor beeps once.
+
+The normal limits are read back from the VESC when the lock goes on and restored when it goes
+off, so nothing has to be configured twice. **Nothing is written to flash**, so switching the
+scooter off clears the lock. This also means a lock cannot be lost while the scooter is on.
+
+Two motors: the same limits are sent to the other VESCs found on the CAN bus with `can-cmd`.
+That overwrites whatever those VESCs had, so they should be set up with the same limits as the
+master. The gesture needs the brake to be released before it fires again.
 
 ## How it works
 The script watches the throttle voltage. While cruising it detaches ADC1 and overrides it with

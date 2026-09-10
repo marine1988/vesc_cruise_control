@@ -48,6 +48,8 @@ Item {
         setReal(cruiseDeadband, parts[3], 2)
         setReal(cruiseMinSpeed, parts[4], 1)
         setReal(cruiseMaxSpeed, parts[5], 1)
+        setReal(legalSpeed, parts[6], 1)
+        setReal(legalWatt, parts[7], 0)
         loaded = true
     }
 
@@ -63,6 +65,8 @@ Item {
             + " " + readReal(cruiseDeadband, 2)
             + " " + readReal(cruiseMinSpeed, 1)
             + " " + readReal(cruiseMaxSpeed, 1)
+            + " " + readReal(legalSpeed, 1)
+            + " " + readReal(legalWatt, 0)
             + ")")
     }
 
@@ -136,6 +140,12 @@ Item {
 
                     Label { text: "Max Speed (km/h)" }
                     TextField { id: cruiseMaxSpeed; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 } }
+
+                    Label { text: "Legal Speed (km/h)"; Layout.columnSpan: 2; font.bold: true }
+                    TextField { id: legalSpeed; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 } }
+
+                    Label { text: "Legal Power (W)" }
+                    TextField { id: legalWatt; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 20000.0; decimals: 0 } }
                 }
             }
         }
