@@ -11,6 +11,9 @@ Item {
     property Commands mCommands: VescIf.commands()
     property bool loaded: false
     property bool saving: false
+    property string cruiseState: "off"
+    property string lastCancel: "none"
+    property bool legalLocked: false
 
     function sendCode(str) {
         mCommands.sendCustomAppData(str + "\0")
@@ -36,10 +39,11 @@ Item {
         return number.toFixed(decimals)
     }
 
+    // cruise <enabled> <hold> <deadband> <min km/h> <max km/h> <legal> <debug>
     function applySettingsLine(line) {
         var parts = line.split(" ")
 
-        if (parts[0] !== "cruise") {
+        if (parts[0] !== "cruise" || parts.length < 8) {
             return
         }
 
@@ -48,9 +52,48 @@ Item {
         setReal(cruiseDeadband, parts[3], 2)
         setReal(cruiseMinSpeed, parts[4], 1)
         setReal(cruiseMaxSpeed, parts[5], 1)
-        setReal(legalSpeed, parts[6], 1)
-        setReal(legalWatt, parts[7], 0)
+        legalEnabled.checked = parts[6] === "true"
+        debugEnabled.checked = parts[7] === "true"
         loaded = true
+    }
+
+    // state <off|engaging|on|cancelling> <last cancel> <locked|unlocked>
+    function applyStateLine(line) {
+        var parts = line.split(" ")
+
+        if (parts[0] !== "state" || parts.length < 4) {
+            return
+        }
+
+        cruiseState = parts[1]
+        lastCancel = parts[2]
+        legalLocked = parts[3] === "locked"
+    }
+
+    function stateText() {
+        if (cruiseState === "engaging") {
+            return "A ligar..."
+        }
+        if (cruiseState === "on") {
+            return "Cruise ligado"
+        }
+        if (cruiseState === "cancelling") {
+            return "A desligar..."
+        }
+        return "Cruise desligado"
+    }
+
+    function stateColor() {
+        if (cruiseState === "on") {
+            return "#2ecc71"
+        }
+        if (cruiseState === "engaging") {
+            return "#f1c40f"
+        }
+        if (cruiseState === "cancelling") {
+            return "#e67e22"
+        }
+        return "#95a5a6"
     }
 
     function saveSettings() {
@@ -65,8 +108,8 @@ Item {
             + " " + readReal(cruiseDeadband, 2)
             + " " + readReal(cruiseMinSpeed, 1)
             + " " + readReal(cruiseMaxSpeed, 1)
-            + " " + readReal(legalSpeed, 1)
-            + " " + readReal(legalWatt, 0)
+            + " " + (legalEnabled.checked ? "true" : "false")
+            + " " + (debugEnabled.checked ? "true" : "false")
             + ")")
     }
 
@@ -88,14 +131,22 @@ Item {
         function onCustomAppDataReceived(data) {
             var message = data.toString().trim()
 
-            if (message === "ack") {
+            // The lisp tags every reply, so the UI never mistakes a load or a reset for a save.
+            // "saved" comes after the cruise/state lines the lisp already sent, so there is
+            // nothing to ask for here; asking again is what made the status repeat forever.
+            if (message === "saved") {
                 saving = false
-                VescIf.emitStatusMessage("Cruise settings saved.", true)
-                getSettings()
+                VescIf.emitStatusMessage("Definições guardadas.", true)
+            } else if (message === "loaded") {
+                saving = false
+            } else if (message === "reset") {
+                saving = false
+                VescIf.emitStatusMessage("Defaults repostos.", true)
             } else if (message === "err") {
                 saving = false
-                VescIf.emitStatusMessage("Saving failed, please try again.", false)
-                getSettings()
+                VescIf.emitStatusMessage("Erro ao guardar.", false)
+            } else if (message.indexOf("state ") === 0) {
+                applyStateLine(message)
             } else {
                 applySettingsLine(message)
             }
@@ -115,37 +166,187 @@ Item {
 
             ColumnLayout {
                 width: parent.width
-                spacing: 4
+                spacing: 2
+
+                Label {
+                    Layout.topMargin: 2
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    font.pixelSize: 14
+                    text: "Cruise Control"
+                }
+
+                CheckBox {
+                    id: cruiseEnabled
+                    text: "Activar Cruise Control"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.bottomMargin: 4
+                    wrapMode: Text.WordWrap
+                    opacity: 0.65
+                    font.pixelSize: 11
+                    text: "Mantém o acelerador parado durante o tempo definido para o cruise ligar. Travar ou mexer o acelerador desliga."
+                }
+
+                Label {
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    text: "Velocidade"
+                }
 
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 2
-                    rowSpacing: 4
+                    rowSpacing: 2
                     columnSpacing: 8
 
-                    CheckBox {
-                        id: cruiseEnabled
+                    Label { text: "Min para ligar (km/h)" }
+                    TextField {
+                        id: cruiseMinSpeed
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 }
+                    }
+                    Label {
                         Layout.columnSpan: 2
-                        text: "Cruise Control"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.bottomMargin: 4
+                        wrapMode: Text.WordWrap
+                        opacity: 0.65
+                        font.pixelSize: 11
+                        text: "Cruise não liga abaixo desta velocidade"
                     }
 
-                    Label { text: "Hold Time (s)" }
-                    TextField { id: cruiseHoldSec; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 30.0; decimals: 1 } }
+                    Label { text: "Max para ligar (km/h)" }
+                    TextField {
+                        id: cruiseMaxSpeed
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 }
+                    }
+                    Label {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.bottomMargin: 4
+                        wrapMode: Text.WordWrap
+                        opacity: 0.65
+                        font.pixelSize: 11
+                        text: "Cruise não liga acima desta velocidade"
+                    }
+                }
+
+                Label {
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    text: "Sensibilidade"
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    rowSpacing: 2
+                    columnSpacing: 8
+
+                    Label { text: "Tempo de espera (s)" }
+                    TextField {
+                        id: cruiseHoldSec
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0.0; top: 30.0; decimals: 1 }
+                    }
+                    Label {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.bottomMargin: 4
+                        wrapMode: Text.WordWrap
+                        opacity: 0.65
+                        font.pixelSize: 11
+                        text: "Quantos segundos tens de manter o acelerador parado para o cruise ligar"
+                    }
 
                     Label { text: "Deadband (V)" }
-                    TextField { id: cruiseDeadband; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01; top: 1.0; decimals: 2 } }
+                    TextField {
+                        id: cruiseDeadband
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0.01; top: 1.0; decimals: 2 }
+                    }
+                    Label {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.bottomMargin: 4
+                        wrapMode: Text.WordWrap
+                        opacity: 0.65
+                        font.pixelSize: 11
+                        text: "Quanto o acelerador pode oscilar e ainda contar como parado"
+                    }
+                    Label {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 12
+                        Layout.bottomMargin: 4
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: 11
+                        color: "#e74c3c"
+                        visible: Number(cruiseDeadband.text) > 0.5
+                        text: "Aviso: deadband alto, o cruise pode ligar com o acelerador a mexer."
+                    }
+                }
 
-                    Label { text: "Min Speed (km/h)" }
-                    TextField { id: cruiseMinSpeed; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 } }
+                Label {
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    text: "Legal lock"
+                }
 
-                    Label { text: "Max Speed (km/h)" }
-                    TextField { id: cruiseMaxSpeed; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 } }
+                CheckBox {
+                    id: legalEnabled
+                    text: "Activar Legal Lock"
+                }
 
-                    Label { text: "Legal Speed (km/h)"; Layout.columnSpan: 2; font.bold: true }
-                    TextField { id: legalSpeed; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 150.0; decimals: 1 } }
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.bottomMargin: 2
+                    wrapMode: Text.WordWrap
+                    opacity: 0.65
+                    font.pixelSize: 11
+                    text: "Limita o motor a 25 km/h. Para activar: travão + 2 blips no acelerador. Mesmo gesto para desligar."
+                }
 
-                    Label { text: "Legal Power (W)" }
-                    TextField { id: legalWatt; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0; top: 20000.0; decimals: 0 } }
+                Label {
+                    Layout.leftMargin: 12
+                    font.pixelSize: 11
+                    color: legalLocked ? "#e67e22" : "#95a5a6"
+                    text: legalLocked ? "Bloqueio activo: 25 km/h / 500 W" : "Bloqueio inactivo"
+                }
+
+                Label {
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    text: "Debug"
+                }
+
+                CheckBox {
+                    id: debugEnabled
+                    text: "Modo debug (logs verbosos)"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.bottomMargin: 4
+                    wrapMode: Text.WordWrap
+                    opacity: 0.65
+                    font.pixelSize: 11
+                    text: "Imprime estado detalhado no terminal do VESC Tool a cada 1s. Para diagnóstico."
                 }
             }
         }
@@ -155,24 +356,45 @@ Item {
 
             Button {
                 Layout.fillWidth: true
-                text: "Load"
+                text: "Carregar"
                 enabled: !saving
                 onClicked: getSettings()
             }
 
             Button {
                 Layout.fillWidth: true
-                text: "Save"
+                text: "Guardar"
                 enabled: loaded && !saving
                 onClicked: saveSettings()
             }
 
             Button {
                 Layout.fillWidth: true
-                text: "Reset"
+                text: "Repor"
                 enabled: loaded && !saving
                 onClicked: sendCode("(restore-settings-ui)")
             }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Label { text: "Estado:" }
+            Label {
+                text: "●"
+                color: root.stateColor()
+            }
+            Label { text: root.stateText() }
+            Item { Layout.fillWidth: true }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            opacity: 0.6
+            font.pixelSize: 11
+            elide: Text.ElideRight
+            text: "Último cancelamento: " + root.lastCancel
         }
     }
 

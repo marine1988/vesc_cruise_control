@@ -1,10 +1,18 @@
 ; VESC Cruise Control
-; Throttle on ADC1, brake on ADC2. Hold the throttle steady for the hold time to engage,
-; a brake or a throttle change cancels it.
+; Throttle on ADC1, brake on ADC2. Hold the throttle steady for the hold time to engage, a brake
+; or a pull on the throttle past the reference cancels it. Letting the throttle go is normal
+; while cruising: the ADC is overridden there, so the physical pin dropping back to rest is the
+; rider handing the speed over, not a request to stop.
 ;
-; Legal lock: stopped, brake held, two throttle blips limits speed and power. It lasts until
-; the scooter is switched off, nothing is written to flash and the limits are pushed to the
-; other VESCs on the CAN bus.
+; Legal lock: stopped, brake held, two throttle blips limit the speed to 25 km/h and the power
+; to 500 W. It lasts until the scooter is switched off, nothing is written to flash and the
+; limits are pushed to the other VESCs on the CAN bus. The limits that were in the VESC are read
+; back before locking and put back on unlocking; if they read as a broken value the lock refuses
+; to engage rather than storing it.
+;
+; A line is printed once per second whether or not debug mode is on, so a ride can be read back
+; from the VESC Tool terminal; debug mode prints the longer line with the reference, the
+; injected voltage and the hold time.
 ;
 ; Needs the ADC app. While cruising, ADC1 is detached and overridden with the voltage that
 ; holds the speed, so the app keeps doing the mapping, ramping and limits, and a master with
@@ -12,9 +20,11 @@
 
 @const-start
 
-(def settings-version 101i32)
+(def settings-version 102i32)
 
 ; Persistent settings: (label . (eeprom-offset type))
+; Offsets 6 and 7 used to hold the legal speed and power, they are now the legal lock and the
+; debug switches. The version bump makes the defaults write over them once.
 (def eeprom-addrs '(
     (ver-code             . (0 i))
     (cruise-enabled       . (1 b))
@@ -22,8 +32,8 @@
     (cruise-deadband      . (3 f))
     (cruise-min-speed-kmh . (4 f))
     (cruise-max-speed-kmh . (5 f))
-    (legal-speed-kmh      . (6 f))
-    (legal-watt           . (7 f))
+    (legal-enabled        . (6 b))
+    (debug-enabled        . (7 b))
 ))
 
 ; Cruise control
@@ -33,9 +43,14 @@
 (def cruise-min-speed 0.0)  ; m/s, only checked while engaging
 (def cruise-max-speed 0.0)
 
-; Legal lock
-(def legal-speed 0.0) ; m/s
-(def legal-watt 0.0)
+; Legal lock, fixed by design, they are not settings
+(def legal-speed-kmh 25.0)
+(def legal-speed 6.9444) ; m/s, 25 km/h
+(def legal-watt 500.0)
+
+; Switches that come from the settings
+(def legal-enabled false)
+(def debug-enabled false)
 
 ; Decoded values are 0 to 1, 0 is released
 (def brake-on 0.10)
@@ -49,6 +64,25 @@
 (def cruise-ki 0.10)   ; volts per m/s per second
 (def cruise-range 0.8) ; how many volts the hold may add or take away
 (def stop-speed (/ 1.0 3.6))
+(def cruise-low-ms 2000)   ; below the stop speed for this long cancels cruise
+(def cruise-high-ms 3000)  ; above the max speed for this long cancels cruise
+(def cruise-high-margin 1.15) ; a little over the max speed is not an overspeed
+(def cancelling-ms 600)    ; keep the state on the screen after a cancel
+(def debug-divider 50)     ; one debug line per second at 50 Hz
+
+; (systime) counts CH_CFG_ST_FREQUENCY ticks per second (10000 on this firmware), it is not in
+; milliseconds. Keeping the times above in seconds/milliseconds and converting here is what the
+; firmware itself does in UTILS_AGE_S; without it every timeout below is ten times too short.
+(def ticks-per-sec 10000.0)
+(def ticks-per-ms 10)
+
+; A cruise that has just taken over must not be cancelled by the throttle: the ADC filter is
+; still settling and the rider is about to let the throttle go. Releasing the throttle is not a
+; "throttle moved", only pulling it past the reference is; the tick counter filters pin noise.
+(def cruise-arm-ms 800)
+(def cruise-arm-time 0)
+(def cruise-moved-ticks 10) ; 200 ms at 50 Hz, a shorter spike on the pin is noise
+(def cruise-moved-count 0)
 
 (def cruise-active false)
 (def cruise-thr-ref 0.0)
@@ -56,6 +90,12 @@
 (def cruise-target 0.0)
 (def cruise-integral 0.0)
 (def cruise-hold-start 0)
+(def cruise-low-start 0)
+(def cruise-high-start 0)
+(def cruise-state 'off)
+(def cruise-state-time 0)
+(def last-cancel 'none)
+(def loop-counter 0)
 
 (def legal false)
 (def legal-saved-speed 0.0)
@@ -91,6 +131,22 @@
                 (if (not-eq (eeprom-read-i addr) new) (eeprom-store-i addr new))))
 )))
 
+; Symbols come out as plain text on the terminal and over send-data
+(defun sym-name (sym)
+    (cond
+        ((eq sym 'off) "off")
+        ((eq sym 'engaging) "engaging")
+        ((eq sym 'on) "on")
+        ((eq sym 'cancelling) "cancelling")
+        ((eq sym 'brake) "brake")
+        ((eq sym 'throttle_moved) "throttle_moved")
+        ((eq sym 'speed_low) "speed_low")
+        ((eq sym 'overspeed) "overspeed")
+        ((eq sym 'script_restart) "script_restart")
+        ((eq sym 'none) "none")
+        (t "unknown")
+))
+
 (defun restore-defaults ()
     {
         (write-setting 'cruise-enabled true)
@@ -98,8 +154,8 @@
         (write-setting 'cruise-deadband 0.10)
         (write-setting 'cruise-min-speed-kmh 5.0)
         (write-setting 'cruise-max-speed-kmh 25.0)
-        (write-setting 'legal-speed-kmh 20.0)
-        (write-setting 'legal-watt 500.0)
+        (write-setting 'legal-enabled false)
+        (write-setting 'debug-enabled false)
         (write-setting 'ver-code settings-version)
     }
 )
@@ -115,11 +171,12 @@
         (set 'cruise-deadband (read-setting 'cruise-deadband))
         (set 'cruise-min-speed (/ (read-setting 'cruise-min-speed-kmh) 3.6))
         (set 'cruise-max-speed (/ (read-setting 'cruise-max-speed-kmh) 3.6))
-        (set 'legal-speed (/ (read-setting 'legal-speed-kmh) 3.6))
-        (set 'legal-watt (read-setting 'legal-watt))
+        (set 'legal-enabled (read-setting 'legal-enabled))
+        (set 'debug-enabled (read-setting 'debug-enabled))
     }
 )
 
+; Every field but the last one ends in a space, str-merge joins them without a separator
 (defun send-settings ()
     {
         (send-data (str-merge
@@ -129,23 +186,35 @@
             (str-from-n (read-setting 'cruise-deadband) "%.2f ")
             (str-from-n (read-setting 'cruise-min-speed-kmh) "%.1f ")
             (str-from-n (read-setting 'cruise-max-speed-kmh) "%.1f ")
-            (str-from-n (read-setting 'legal-speed-kmh) "%.1f ")
-            (str-from-n (read-setting 'legal-watt) "%.0f")
+            (if (read-setting 'legal-enabled) "true " "false ")
+            (if (read-setting 'debug-enabled) "true" "false")
         ))
     }
 )
 
-(defun save-cruise-settings (enabled hold-sec deadband min-speed-kmh max-speed-kmh legal-speed-kmh legal-watt)
+(defun send-state ()
+    {
+        (send-data (str-merge
+            "state "
+            (sym-name cruise-state) " "
+            (sym-name last-cancel) " "
+            (if legal "locked" "unlocked")
+        ))
+    }
+)
+
+(defun save-cruise-settings (enabled hold-sec deadband min-speed-kmh max-speed-kmh legal-on debug-on)
     {
         (write-setting 'cruise-enabled enabled)
         (write-setting 'cruise-hold-sec hold-sec)
         (write-setting 'cruise-deadband deadband)
         (write-setting 'cruise-min-speed-kmh min-speed-kmh)
         (write-setting 'cruise-max-speed-kmh max-speed-kmh)
-        (write-setting 'legal-speed-kmh legal-speed-kmh)
-        (write-setting 'legal-watt legal-watt)
+        (write-setting 'legal-enabled legal-on)
+        (write-setting 'debug-enabled debug-on)
         (load-settings)
         (send-settings)
+        (send-state)
     }
 )
 
@@ -154,15 +223,36 @@
         (restore-defaults)
         (load-settings)
         (send-settings)
+        (send-state)
     }
 )
 
-; The UI waits for this before sending the next command, a burst would overrun the mailbox
+; The UI waits for this before sending the next command, a burst would overrun the mailbox.
+; The reply is tagged with the command it answers, a plain "ack" for everything made the UI
+; show "settings saved" on every reply and ask for the settings again, an endless loop.
+; The first symbol of the command picks the tag.
 (defun event-handler ()
     (loopwhile t
         (recv
             ((event-data-rx . (? data))
-                (send-data (if (eq (car (trap (eval (read data)))) 'exit-ok) "ack" "err"))
+                (let ((parsed (trap (read data))))
+                    (send-data
+                        (if (eq (car parsed) 'exit-error)
+                            "err"
+                            (let ((command (car (second parsed))))
+                                (if (eq (car (trap (eval (second parsed)))) 'exit-error)
+                                    "err"
+                                    (cond
+                                        ((eq command 'save-cruise-settings) "saved")
+                                        ((eq command 'send-settings) "loaded")
+                                        ((eq command 'restore-settings-ui) "reset")
+                                        (t "ack")
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
             )
             (_ nil)
         )
@@ -173,17 +263,37 @@
         (foc-play-tone 0 2500 24.0)
         (sleep 0.15)
         (foc-play-stop)
+        (sleep 0.1)
     }
+)
+
+(defun beep-3 ()
+    (looprange i 0 3 (beep))
+)
+
+; The state stays on the screen for a moment after a cancel, so the UI has time to show it
+(defun set-cruise-state (state)
+    (if (and (eq cruise-state 'cancelling) (< (- (systime) cruise-state-time) (* cancelling-ms ticks-per-ms)))
+        nil
+        (if (not-eq cruise-state state)
+            {
+                (set 'cruise-state state)
+                (set 'cruise-state-time (systime))
+            }
+        )
+    )
 )
 
 ; Limits are per VESC, so the other ones on the bus need the same values
 (defun apply-limits (speed watt)
     {
+        (var n 0)
         (conf-set 'max-speed speed)
         (conf-set 'l-watt-max watt)
 
         (loopforeach id (can-list-devs)
             {
+                (setq n (+ n 1))
                 ; can-cmd takes two commands per second per device at most
                 (can-cmd id (str-from-n speed "(conf-set 'max-speed %.4f)"))
                 (sleep 0.6)
@@ -191,27 +301,66 @@
                 (sleep 0.6)
             }
         )
+
+        ; One line per push: it says whether the other VESC on a two motor scooter was found at all
+        (print (str-merge
+            (str-from-n speed "Limits %.4f m/s ")
+            (str-from-n watt "%.1f W set on this VESC, VESCs on CAN: ")
+            (str-from-n n "%d")
+        ))
     }
+)
+
+(defun legal-unlock ()
+    {
+        (apply-limits legal-saved-speed legal-saved-watt)
+        (set 'legal false)
+        (print "Legal lock OFF")
+    }
+)
+
+; A limit read back from the VESC is only usable when it is a sane positive number. A zero, an
+; infinity or a NaN would be stored as the value to restore and the scooter would end up limited
+; (or unlimited) for good, because the restore would push the broken value back.
+; A NaN fails both comparisons, so no is-nan/is-inf is needed here.
+(defun valid-limit (v)
+    (and (> v 0.0) (< v 1000000.0))
 )
 
 (defun legal-toggle ()
     {
         (if legal
             {
-                (apply-limits legal-saved-speed legal-saved-watt)
-                (set 'legal false)
+                (legal-unlock)
                 (beep)
-                (print "Legal lock OFF")
             }
             {
-                (set 'legal-saved-speed (conf-get 'max-speed))
-                (set 'legal-saved-watt (conf-get 'l-watt-max))
-                (apply-limits legal-speed legal-watt)
-                (set 'legal true)
-                (beep)
-                (sleep 0.1)
-                (beep)
-                (print (str-from-n (* legal-speed 3.6) "Legal lock ON - %.0f km/h"))
+                (var save-speed (conf-get 'max-speed))
+                (var save-watt (conf-get 'l-watt-max))
+
+                (if (and (valid-limit save-speed) (valid-limit save-watt))
+                    {
+                        (set 'legal-saved-speed save-speed)
+                        (set 'legal-saved-watt save-watt)
+                        (print (str-merge
+                            (str-from-n save-speed "Legal limits to restore: %.4f m/s, ")
+                            (str-from-n save-watt "%.1f W")
+                        ))
+                        (apply-limits legal-speed legal-watt)
+                        (set 'legal true)
+                        (beep)
+                        (beep)
+                        (print (str-from-n legal-speed-kmh "Legal lock ON - %.0f km/h"))
+                    }
+                    {
+                        ; never store a broken value: the restore would push it back
+                        (print (str-merge
+                            (str-from-n save-speed "Legal lock ABORTED - bad max-speed: %.4f m/s, ")
+                            (str-from-n save-watt "l-watt-max: %.1f W")
+                        ))
+                        (beep-3)
+                    }
+                )
             }
         )
     }
@@ -219,50 +368,69 @@
 
 (defun legal-gesture ()
     {
-        (var brk (get-adc-decoded 1))
-        (var spd (get-speed))
+        (if legal-enabled
+            {
+                (var brk (get-adc-decoded 1))
+                (var spd (get-speed))
 
-        (if (and (< spd stop-speed) (> brk brake-on))
-            (if legal-done
-                nil
-                {
-                    (var thr (get-adc-decoded 0))
-                    (if (> thr blip-on)
-                        (if (not legal-high)
-                            {
-                                (set 'legal-high true)
-                                (set 'legal-blips (+ legal-blips 1))
-                            }
-                        )
-                        (if (< thr blip-off)
-                            (set 'legal-high false)
-                        )
-                    )
-                    (if (>= legal-blips blips-needed)
+                (if (and (< spd stop-speed) (> brk brake-on))
+                    (if legal-done
+                        nil
                         {
-                            (legal-toggle)
-                            (set 'legal-blips 0)
-                            (set 'legal-high false)
-                            (set 'legal-done true)
+                            (var thr (get-adc-decoded 0))
+                            (if (> thr blip-on)
+                                (if (not legal-high)
+                                    {
+                                        (set 'legal-high true)
+                                        (set 'legal-blips (+ legal-blips 1))
+                                        ; the blips show up on the terminal: no line means the
+                                        ; brake is not read or the throttle never decoded that high
+                                        (print (str-from-n legal-blips "Legal gesture, blip %d"))
+                                    }
+                                )
+                                (if (< thr blip-off)
+                                    (set 'legal-high false)
+                                )
+                            )
+                            (if (>= legal-blips blips-needed)
+                                {
+                                    (legal-toggle)
+                                    (set 'legal-blips 0)
+                                    (set 'legal-high false)
+                                    (set 'legal-done true)
+                                }
+                            )
                         }
                     )
-                }
-            )
-            { ; the brake is released, ready for the next gesture
-                (set 'legal-done false)
-                (set 'legal-high false)
-                (set 'legal-blips 0)
+                    { ; the brake is released, ready for the next gesture
+                        (set 'legal-done false)
+                        (set 'legal-high false)
+                        (set 'legal-blips 0)
+                    }
+                )
             }
+            (if legal (legal-unlock)) ; the switch went off, give the limits back
         )
     }
 )
 
-(defun cruise-cancel ()
+; reason is a symbol, it ends up in last-cancel for the debug line
+(defun cruise-cancel (reason)
     {
         (app-adc-detach 1 0) ; hand the throttle back to the rider first
         (app-adc-override 0 0)
         (set 'cruise-active false)
-        (print "Cruise OFF")
+        (set 'cruise-thr-ref 0.0)
+        (set 'cruise-hold-start 0)
+        (set 'cruise-integral 0.0)
+        (set 'cruise-low-start 0)
+        (set 'cruise-high-start 0)
+        (set 'cruise-moved-count 0)
+        (set 'cruise-arm-time 0)
+        (set 'last-cancel reason)
+        (set 'cruise-state 'cancelling)
+        (set 'cruise-state-time (systime))
+        (print (str-merge "Cruise OFF - " (sym-name reason)))
     }
 )
 
@@ -273,7 +441,13 @@
         (set 'cruise-volts cruise-thr-ref)
         (set 'cruise-target (get-speed))
         (set 'cruise-integral 0.0)
+        (set 'cruise-low-start 0)
+        (set 'cruise-high-start 0)
+        (set 'cruise-moved-count 0)
+        (set 'cruise-arm-time (systime)) ; the throttle is not watched for cruise-arm-ms
         (set 'cruise-active true)
+        (set 'cruise-state 'on)
+        (set 'cruise-state-time (systime))
         (print (str-from-n (* cruise-target 3.6) "Cruise ON - %.1f km/h"))
     }
 )
@@ -294,11 +468,65 @@
         (var volts (+ cruise-thr-ref (* cruise-kp err) cruise-integral))
 
         ; never wander far from where the rider had the throttle
-        (if (< volts lo) (setf volts lo))
-        (if (> volts hi) (setf volts hi))
+        (if (< volts lo) (setq volts lo))
+        (if (> volts hi) (setq volts hi))
 
         (set 'cruise-volts volts)
         (app-adc-override 0 cruise-volts)
+    }
+)
+
+; One cancel reason per tick, the first one that fires wins
+(defun cruise-reason (spd brk)
+    {
+        (var reason 'none)
+
+        ; stopped for a while: the rider is not riding anymore, warn with three beeps
+        (if (< spd stop-speed)
+            (if (= cruise-low-start 0)
+                (set 'cruise-low-start (systime))
+                (if (> (- (systime) cruise-low-start) (* cruise-low-ms ticks-per-ms))
+                    (setq reason 'speed_low)
+                )
+            )
+            (set 'cruise-low-start 0)
+        )
+
+        (if (and (eq reason 'none) (> brk brake-on))
+            (setq reason 'brake)
+        )
+
+        ; (get-adc 0) reads the throttle pin and ignores the override, so while cruising it is the
+        ; physical throttle, not the voltage the ADC app is using, and it falls back to rest as
+        ; soon as the rider lets the throttle go - which is what a rider does when the cruise
+        ; takes over. Comparing it with the reference in both directions made every release
+        ; cancel the cruise, one tick after engaging. Only a pull past the reference counts as a
+        ; move here, and it has to last a few ticks, so a spike on the pin cannot end a cruise.
+        (if (> (get-adc 0) (+ cruise-thr-ref cruise-deadband))
+            (set 'cruise-moved-count (+ cruise-moved-count 1))
+            (set 'cruise-moved-count 0)
+        )
+
+        (if (and (eq reason 'none)
+                 (> (- (systime) cruise-arm-time) (* cruise-arm-ms ticks-per-ms))
+                 (> cruise-moved-count cruise-moved-ticks))
+            (setq reason 'throttle_moved)
+        )
+
+        ; the overspeed guard only means something once a max speed is set
+        (if (and (eq reason 'none)
+                 (> cruise-max-speed stop-speed)
+                 (> spd (* cruise-max-speed cruise-high-margin)))
+            (if (= cruise-high-start 0)
+                (set 'cruise-high-start (systime))
+                (if (> (- (systime) cruise-high-start) (* cruise-high-ms ticks-per-ms))
+                    (setq reason 'overspeed)
+                )
+            )
+            (set 'cruise-high-start 0)
+        )
+
+        reason
     }
 )
 
@@ -308,28 +536,47 @@
         (var brk (get-adc-decoded 1))
 
         (if cruise-active
-            (if (or (> brk brake-on)
-                    (> (abs (- (get-adc 0) cruise-thr-ref)) cruise-deadband)
-                    (< spd stop-speed))
-                (cruise-cancel)
-                (cruise-hold)
-            )
+            {
+                (var reason (cruise-reason spd brk))
+
+                (if (eq reason 'none)
+                    {
+                        (set-cruise-state 'on)
+                        (cruise-hold)
+                    }
+                    {
+                        (cruise-cancel reason)
+                        (if (eq reason 'speed_low) (beep-3))
+                    }
+                )
+            }
             {
                 (var thr (get-adc-decoded 0))
-                (if (and cruise-enabled
-                         (< brk brake-on)
-                         (> thr thr-min)
-                         (< (abs (- (get-adc 0) cruise-thr-ref)) cruise-deadband))
-                    (let ((elapsed (/ (- (systime) cruise-hold-start) 1000.0)))
-                        (if (>= elapsed cruise-hold-sec)
+                (var thr-volts (get-adc 0))
+
+                (if (and cruise-enabled (< brk brake-on) (> thr thr-min))
+                    {
+                        ; first valid sample of a hold, or the throttle moved: restart the count
+                        (if (or (= cruise-hold-start 0)
+                                (> (abs (- thr-volts cruise-thr-ref)) cruise-deadband))
+                            {
+                                (set 'cruise-thr-ref thr-volts)
+                                (set 'cruise-hold-start (systime))
+                            }
+                        )
+
+                        (set-cruise-state 'engaging)
+
+                        (if (>= (/ (- (systime) cruise-hold-start) ticks-per-sec) cruise-hold-sec)
                             (if (and (>= spd cruise-min-speed) (<= spd cruise-max-speed))
                                 (cruise-engage)
                             )
                         )
-                    )
-                    { ; the throttle moved, restart the hold
-                        (set 'cruise-thr-ref (get-adc 0))
-                        (set 'cruise-hold-start (systime))
+                    }
+                    { ; not riding, the next hold starts from scratch
+                        (set 'cruise-hold-start 0)
+                        (set 'cruise-thr-ref 0.0)
+                        (set-cruise-state 'off)
                     }
                 )
             }
@@ -337,11 +584,78 @@
     }
 )
 
+(defun debug-print ()
+    {
+        (var hold 0.0)
+        (if (!= cruise-hold-start 0)
+            (setq hold (/ (- (systime) cruise-hold-start) ticks-per-sec))
+        )
+
+        (print (str-merge
+            "[DEBUG] thr="
+            (str-from-n (get-adc 0) "%.3f")
+            "V ref="
+            (str-from-n cruise-thr-ref "%.3f")
+            "V inj="
+            (str-from-n cruise-volts "%.3f")
+            "V brk="
+            (str-from-n (get-adc 1) "%.3f")
+            "V spd="
+            (str-from-n (* (get-speed) 3.6) "%.1f")
+            "km/h state="
+            (sym-name cruise-state)
+            " hold="
+            (str-from-n hold "%.1f")
+            "s last_cancel="
+            (sym-name last-cancel)
+        ))
+    }
+)
+
+; One line per second even with the debug switch off, so a ride can be read back from the
+; terminal without turning anything on. thr is the physical pin and inj is the voltage the
+; script is feeding the ADC app: while cruising they are different by design, and inj is the
+; one the app uses. brkD is the decoded brake, the value the legal gesture needs to see.
+(defun watch-print ()
+    (print (str-merge
+        "[WATCH] thr="
+        (str-from-n (get-adc 0) "%.3f")
+        "V ref="
+        (str-from-n cruise-thr-ref "%.3f")
+        "V inj="
+        (str-from-n cruise-volts "%.3f")
+        "V brk="
+        (str-from-n (get-adc 1) "%.3f")
+        "V brkD="
+        (str-from-n (get-adc-decoded 1) "%.2f")
+        " spd="
+        (str-from-n (* (get-speed) 3.6) "%.1f")
+        "km/h active="
+        (if cruise-active "1" "0")
+        " lock="
+        (if legal "1" "0")
+        " state="
+        (sym-name cruise-state)
+        " cancel="
+        (sym-name last-cancel)
+    ))
+)
+
 (defun control-loop ()
     (loopwhile t
         {
             (legal-gesture)
             (cruise-step)
+
+            (set 'loop-counter (+ loop-counter 1))
+            (if (>= loop-counter debug-divider)
+                {
+                    (set 'loop-counter 0)
+                    (if debug-enabled (debug-print) (watch-print))
+                    (send-state) ; one state message per second, the UI shows it at the bottom
+                }
+            )
+
             (sleep (/ 1.0 cruise-hz))
         }
     )
@@ -350,6 +664,7 @@
 (defun main () {
         (load-settings)
         (app-adc-detach 1 0) ; both ADCs attached on start-up, a stopped script leaves them detached
+        (set 'last-cancel 'script_restart) ; the image was just loaded, any cruise that was on is gone
 
         (var ctrl-type (conf-get 'adc-ctrl-type))
         (print (str-from-n ctrl-type "ADC control type: %d"))
@@ -357,8 +672,22 @@
             (print "Cruise control needs a current or duty control type in the ADC app")
         )
 
+        ; What the script thinks it was told, on the terminal: the UI and the log have to agree
+        (print (str-merge
+            "Settings: cruise "
+            (if cruise-enabled "on" "off")
+            " legal gesture "
+            (if legal-enabled "on" "off")
+            " debug "
+            (if debug-enabled "on" "off")
+            ", one line per second on this terminal"
+        ))
+
         (event-register-handler (spawn event-handler))
         (event-enable 'event-data-rx)
+
+        (send-settings)
+        (send-state)
 
         (control-loop) ; blocks the main thread
 })
