@@ -68,8 +68,8 @@ While cruising, ADC1 is detached and overridden, so **the throttle pin and the i
 are different by design**: letting the throttle go moves `thr` back to rest and that is normal.
 
 ## Legal lock
-Stopped, tap the brake five times within five seconds. The motor beeps twice and the speed is
-limited to 25 km/h and the power to 500 W. The same gesture gives the normal limits back, the
+Stopped, tap the brake five times within five seconds. The motor beeps three times and the speed
+is limited to 25 km/h and the power to 500 W. The same gesture gives the normal limits back, the
 motor beeps once. Each tap and the limits that are about to be applied are printed on the
 terminal.
 
@@ -81,7 +81,7 @@ after a pause starts a new count instead of finishing the old one.
 
 The normal limits are read back from the VESC when the lock goes on and restored when it goes
 off, so nothing has to be configured twice. **If those values do not read back as sane positive
-numbers the lock refuses to engage** and beeps three times instead of storing a broken value that
+numbers the lock refuses to engage** and beeps four times instead of storing a broken value that
 the unlock would push back. **Nothing is written to flash**, so switching the scooter off clears
 the lock. This also means a lock cannot be lost while the scooter is on.
 
@@ -89,6 +89,19 @@ Two motors: the same limits are sent to the other VESCs found on the CAN bus wit
 line printed after each push says how many were found. That overwrites whatever those VESCs had,
 so they should be set up with the same limits as the master. The scooter has to stand still, and
 the brake has to be released and tapped again before the gesture fires again.
+
+## Beeps
+| Event | Beeps |
+|---|---|
+| Cruise engages | one long |
+| Cruise cancels | two short |
+| Legal lock engages | three short |
+| Legal lock releases | one short |
+| Legal lock refused | four short |
+
+The long beep is started by the loop and stopped by it a moment later rather than slept through:
+while cruise holds the speed the ADC1 override has to keep being sent, and sleeping through a
+beep would let the timeout stop the motor.
 
 ## How it works
 The script watches the throttle voltage. While cruising it detaches ADC1 and overrides it with

@@ -90,6 +90,7 @@
 (def cruise-moved-count 0)
 
 (def cruise-active false)
+(def tone-stop 0) ; systime when the running beep has to stop, 0 when none is playing
 (def cruise-thr-ref 0.0)
 (def cruise-volts 0.0)
 (def cruise-target 0.0)
@@ -264,6 +265,8 @@
         )
 ))
 
+; A short beep blocks this thread for a quarter of a second, which is fine everywhere except
+; while ADC1 is detached: there the override has to keep coming or the timeout stops the motor.
 (defun beep ()
     {
         (foc-play-tone 0 2500 24.0)
@@ -273,8 +276,25 @@
     }
 )
 
-(defun beep-3 ()
-    (looprange i 0 3 (beep))
+(defun beeps (n)
+    (looprange i 0 n (beep))
+)
+
+; The long beep is started and left running, the control loop stops it. Nothing blocks here.
+(defun tone (freq ms)
+    {
+        (foc-play-tone 0 freq 24.0)
+        (set 'tone-stop (+ (systime) (* ms ticks-per-ms)))
+    }
+)
+
+(defun tone-service ()
+    (if (and (!= tone-stop 0) (> (systime) tone-stop))
+        {
+            (foc-play-stop)
+            (set 'tone-stop 0)
+        }
+    )
 )
 
 ; The state stays on the screen for a moment after a cancel, so the UI has time to show it
@@ -354,8 +374,7 @@
                         ))
                         (apply-limits legal-speed legal-watt)
                         (set 'legal true)
-                        (beep)
-                        (beep)
+                        (beeps 3)
                         (print (str-from-n legal-speed-kmh "Legal lock ON - %.0f km/h"))
                     }
                     {
@@ -364,7 +383,7 @@
                             (str-from-n save-speed "Legal lock ABORTED - bad max-speed: %.4f m/s, ")
                             (str-from-n save-watt "l-watt-max: %.1f W")
                         ))
-                        (beep-3)
+                        (beeps 4)
                     }
                 )
             }
@@ -445,6 +464,7 @@
         (set 'cruise-state 'cancelling)
         (set 'cruise-state-time (systime))
         (print (str-merge "Cruise OFF - " (sym-name reason)))
+        (beeps 2)
     }
 )
 
@@ -463,6 +483,7 @@
         (set 'cruise-state 'on)
         (set 'cruise-state-time (systime))
         (print (str-from-n (* cruise-target 3.6) "Cruise ON - %.1f km/h"))
+        (tone 2500 500) ; one long beep, and it does not block the override
     }
 )
 
@@ -558,10 +579,7 @@
                         (set-cruise-state 'on)
                         (cruise-hold)
                     }
-                    {
-                        (cruise-cancel reason)
-                        (if (eq reason 'speed_low) (beep-3))
-                    }
+                    (cruise-cancel reason)
                 )
             }
             {
@@ -672,6 +690,7 @@
 (defun control-loop ()
     (loopwhile t
         {
+            (tone-service)
             (legal-gesture)
             (cruise-step)
 

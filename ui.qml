@@ -72,15 +72,15 @@ Item {
 
     function stateText() {
         if (cruiseState === "engaging") {
-            return "A ligar..."
+            return "Engaging..."
         }
         if (cruiseState === "on") {
-            return "Cruise ligado"
+            return "Cruise on"
         }
         if (cruiseState === "cancelling") {
-            return "A desligar..."
+            return "Cancelling..."
         }
-        return "Cruise desligado"
+        return "Cruise off"
     }
 
     function stateColor() {
@@ -136,15 +136,15 @@ Item {
             // nothing to ask for here; asking again is what made the status repeat forever.
             if (message === "saved") {
                 saving = false
-                VescIf.emitStatusMessage("Definições guardadas.", true)
+                VescIf.emitStatusMessage("Settings saved.", true)
             } else if (message === "loaded") {
                 saving = false
             } else if (message === "reset") {
                 saving = false
-                VescIf.emitStatusMessage("Defaults repostos.", true)
+                VescIf.emitStatusMessage("Defaults restored.", true)
             } else if (message === "err") {
                 saving = false
-                VescIf.emitStatusMessage("Erro ao guardar.", false)
+                VescIf.emitStatusMessage("Saving failed.", false)
             } else if (message.indexOf("state ") === 0) {
                 applyStateLine(message)
             } else {
@@ -178,7 +178,7 @@ Item {
 
                 CheckBox {
                     id: cruiseEnabled
-                    text: "Activar Cruise Control"
+                    text: "Enable Cruise Control"
                 }
 
                 Label {
@@ -188,14 +188,14 @@ Item {
                     wrapMode: Text.WordWrap
                     opacity: 0.65
                     font.pixelSize: 11
-                    text: "Mantém o acelerador parado durante o tempo definido para o cruise ligar. Travar ou mexer o acelerador desliga."
+                    text: "Hold the throttle steady for the hold time and cruise engages. A brake, or a pull past the position it holds, cancels it."
                 }
 
                 Label {
                     Layout.topMargin: 6
                     Layout.bottomMargin: 2
                     font.bold: true
-                    text: "Velocidade"
+                    text: "Speed"
                 }
 
                 GridLayout {
@@ -204,7 +204,7 @@ Item {
                     rowSpacing: 2
                     columnSpacing: 8
 
-                    Label { text: "Min para ligar (km/h)" }
+                    Label { text: "Min Speed (km/h)" }
                     TextField {
                         id: cruiseMinSpeed
                         Layout.fillWidth: true
@@ -218,10 +218,10 @@ Item {
                         wrapMode: Text.WordWrap
                         opacity: 0.65
                         font.pixelSize: 11
-                        text: "Cruise não liga abaixo desta velocidade"
+                        text: "Cruise does not engage below this speed"
                     }
 
-                    Label { text: "Max para ligar (km/h)" }
+                    Label { text: "Max Speed (km/h)" }
                     TextField {
                         id: cruiseMaxSpeed
                         Layout.fillWidth: true
@@ -235,7 +235,7 @@ Item {
                         wrapMode: Text.WordWrap
                         opacity: 0.65
                         font.pixelSize: 11
-                        text: "Cruise não liga acima desta velocidade"
+                        text: "Cruise does not engage above this speed"
                     }
                 }
 
@@ -243,7 +243,7 @@ Item {
                     Layout.topMargin: 6
                     Layout.bottomMargin: 2
                     font.bold: true
-                    text: "Sensibilidade"
+                    text: "Sensitivity"
                 }
 
                 GridLayout {
@@ -252,7 +252,7 @@ Item {
                     rowSpacing: 2
                     columnSpacing: 8
 
-                    Label { text: "Tempo de espera (s)" }
+                    Label { text: "Hold Time (s)" }
                     TextField {
                         id: cruiseHoldSec
                         Layout.fillWidth: true
@@ -266,7 +266,7 @@ Item {
                         wrapMode: Text.WordWrap
                         opacity: 0.65
                         font.pixelSize: 11
-                        text: "Quantos segundos tens de manter o acelerador parado para o cruise ligar"
+                        text: "How long the throttle has to stay steady before cruise engages"
                     }
 
                     Label { text: "Deadband (V)" }
@@ -283,7 +283,7 @@ Item {
                         wrapMode: Text.WordWrap
                         opacity: 0.65
                         font.pixelSize: 11
-                        text: "Quanto o acelerador pode oscilar e ainda contar como parado"
+                        text: "How far the throttle may drift and still count as steady"
                     }
                     Label {
                         Layout.columnSpan: 2
@@ -294,7 +294,7 @@ Item {
                         font.pixelSize: 11
                         color: "#e74c3c"
                         visible: Number(cruiseDeadband.text) > 0.5
-                        text: "Aviso: deadband alto, o cruise pode ligar com o acelerador a mexer."
+                        text: "Warning: high deadband, cruise may engage with the throttle moving."
                     }
                 }
 
@@ -302,12 +302,12 @@ Item {
                     Layout.topMargin: 6
                     Layout.bottomMargin: 2
                     font.bold: true
-                    text: "Legal lock"
+                    text: "Legal Lock"
                 }
 
                 CheckBox {
                     id: legalEnabled
-                    text: "Activar Legal Lock"
+                    text: "Enable Legal Lock"
                 }
 
                 Label {
@@ -317,14 +317,14 @@ Item {
                     wrapMode: Text.WordWrap
                     opacity: 0.65
                     font.pixelSize: 11
-                    text: "Limita o motor a 25 km/h / 500 W. Parado: 5 toques no travão dentro de 5 segundos. Mesmo gesto para desligar."
+                    text: "Limits the motor to 25 km/h / 500 W. Stopped: tap the brake 5 times within 5 seconds. Same gesture to unlock."
                 }
 
                 Label {
                     Layout.leftMargin: 12
                     font.pixelSize: 11
                     color: legalLocked ? "#e67e22" : "#95a5a6"
-                    text: legalLocked ? "Bloqueio activo: 25 km/h / 500 W" : "Bloqueio inactivo"
+                    text: legalLocked ? "Locked: 25 km/h / 500 W" : "Unlocked"
                 }
 
                 Label {
@@ -336,7 +336,7 @@ Item {
 
                 CheckBox {
                     id: debugEnabled
-                    text: "Modo debug (logs verbosos)"
+                    text: "Debug mode (verbose logs)"
                 }
 
                 Label {
@@ -346,7 +346,7 @@ Item {
                     wrapMode: Text.WordWrap
                     opacity: 0.65
                     font.pixelSize: 11
-                    text: "Imprime estado detalhado no terminal do VESC Tool a cada 1s. Para diagnóstico."
+                    text: "Prints a detailed line on the VESC Tool terminal once per second. For diagnosis."
                 }
             }
         }
@@ -356,21 +356,21 @@ Item {
 
             Button {
                 Layout.fillWidth: true
-                text: "Carregar"
+                text: "Load"
                 enabled: !saving
                 onClicked: getSettings()
             }
 
             Button {
                 Layout.fillWidth: true
-                text: "Guardar"
+                text: "Save"
                 enabled: loaded && !saving
                 onClicked: saveSettings()
             }
 
             Button {
                 Layout.fillWidth: true
-                text: "Repor"
+                text: "Reset"
                 enabled: loaded && !saving
                 onClicked: sendCode("(restore-settings-ui)")
             }
@@ -380,7 +380,7 @@ Item {
             Layout.fillWidth: true
             spacing: 6
 
-            Label { text: "Estado:" }
+            Label { text: "State:" }
             Label {
                 text: "●"
                 color: root.stateColor()
@@ -394,7 +394,7 @@ Item {
             opacity: 0.6
             font.pixelSize: 11
             elide: Text.ElideRight
-            text: "Último cancelamento: " + root.lastCancel
+            text: "Last cancel: " + root.lastCancel
         }
     }
 
