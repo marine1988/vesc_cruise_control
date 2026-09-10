@@ -317,7 +317,7 @@ Item {
                     wrapMode: Text.WordWrap
                     opacity: 0.65
                     font.pixelSize: 11
-                    text: "Limita o motor a 25 km/h. Para activar: travão + 2 blips no acelerador. Mesmo gesto para desligar."
+                    text: "Limita o motor a 25 km/h / 500 W. Parado: um toque no travão e depois 2 blips no acelerador. Mesmo gesto para desligar."
                 }
 
                 Label {

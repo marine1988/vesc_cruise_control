@@ -58,9 +58,10 @@
 ; that is easy to leave unconfigured. Either signal counts as a brake.
 (def brake-raw-on 1.5)  ; volts on the brake pin
 (def thr-min 0.10)     ; throttle below this is not riding
-(def blip-on 0.30)     ; a blip rises past this
+(def blip-on 0.20)     ; a blip rises past this
 (def blip-off 0.10)    ; and back below this
 (def blips-needed 2)
+(def arm-window-ms 3000) ; how long the blips may take after the brake tap
 
 (def cruise-hz 50)
 (def cruise-kp 0.25)   ; volts per m/s
@@ -105,7 +106,11 @@
 (def legal-saved-watt 0.0)
 (def legal-blips 0)
 (def legal-high false)
-(def legal-done false) ; the gesture fired, wait for the brake to be released
+; The brake switch cuts the throttle signal on this scooter, so a brake tap arms the gesture and
+; the blips come after it, on the released brake.
+(def legal-armed false)
+(def legal-arm-time 0)
+(def legal-brake-seen false)
 
 (defun read-setting (name)
     (let (
@@ -380,19 +385,44 @@
         (if legal-enabled
             {
                 (var spd (get-speed))
+                (var brk (brake-pressed))
+                (var thr (get-adc-decoded 0))
 
-                (if (and (< spd stop-speed) (brake-pressed))
-                    (if legal-done
-                        nil
+                ; a brake tap at a standstill with the throttle closed arms the gesture
+                (if (and (< spd stop-speed)
+                         brk
+                         (not legal-brake-seen)
+                         (< thr blip-off))
+                    {
+                        (set 'legal-armed true)
+                        (set 'legal-arm-time (systime))
+                        (set 'legal-blips 0)
+                        (set 'legal-high false)
+                        (print "Legal gesture armed, blip the throttle twice")
+                    }
+                )
+
+                ; the window counts from the release, that is when the throttle works again
+                (if (and legal-armed (not brk) legal-brake-seen)
+                    (set 'legal-arm-time (systime))
+                )
+                (set 'legal-brake-seen brk)
+
+                (if legal-armed
+                    (if (or (>= spd stop-speed)
+                            (> (- (systime) legal-arm-time) (* arm-window-ms ticks-per-ms)))
+                        { ; the window closed or the scooter rolled, forget it
+                            (set 'legal-armed false)
+                            (set 'legal-blips 0)
+                            (set 'legal-high false)
+                            (print "Legal gesture timed out")
+                        }
                         {
-                            (var thr (get-adc-decoded 0))
                             (if (> thr blip-on)
                                 (if (not legal-high)
                                     {
                                         (set 'legal-high true)
                                         (set 'legal-blips (+ legal-blips 1))
-                                        ; the blips show up on the terminal: no line means the
-                                        ; brake is not read or the throttle never decoded that high
                                         (print (str-from-n legal-blips "Legal gesture, blip %d"))
                                     }
                                 )
@@ -403,18 +433,13 @@
                             (if (>= legal-blips blips-needed)
                                 {
                                     (legal-toggle)
+                                    (set 'legal-armed false)
                                     (set 'legal-blips 0)
                                     (set 'legal-high false)
-                                    (set 'legal-done true)
                                 }
                             )
                         }
                     )
-                    { ; the brake is released, ready for the next gesture
-                        (set 'legal-done false)
-                        (set 'legal-high false)
-                        (set 'legal-blips 0)
-                    }
                 )
             }
             (if legal (legal-unlock)) ; the switch went off, give the limits back

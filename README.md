@@ -56,7 +56,8 @@ not:
   counts it as pressed. **Either signal counts**, so a brake switch works even when the ADC2
   mapping was never configured - which is what makes the pin worth watching.
 - `legal` is the gesture switch, `blips` how many blips it has counted, `locked` the lock itself.
-  A blip prints `Legal gesture, blip N` on its own line, so a gesture that never arms is visible
+  The gesture prints its own lines: `Legal gesture armed` on the brake tap, `Legal gesture, blip N`
+  per blip, `Legal gesture timed out` when the window closed. A gesture that never arms is visible
   at once.
 - `active` is the cruise, `lock` the legal lock, `state` is `off`/`engaging`/`on`/`cancelling`
   and `cancel` the reason the last cruise ended (`brake`, `throttle_moved`, `speed_low`,
@@ -68,10 +69,14 @@ While cruising, ADC1 is detached and overridden, so **the throttle pin and the i
 are different by design**: letting the throttle go moves `thr` back to rest and that is normal.
 
 ## Legal lock
-Stopped with the brake held, twist the throttle out twice. The motor beeps twice and the speed is
-limited to 25 km/h and the power to 500 W. Do the same gesture again to go back to the normal
-limits, the motor beeps once. Each blip and the limits that are about to be applied are printed on
-the terminal.
+Stopped, tap the brake and then twist the throttle out twice within three seconds. The motor
+beeps twice and the speed is limited to 25 km/h and the power to 500 W. The same gesture gives
+the normal limits back, the motor beeps once. The tap, each blip and the limits that are about to
+be applied are printed on the terminal.
+
+The blips come **after** the brake, never during it: on a scooter whose brake switch cuts the
+throttle signal the throttle pin reads zero while the brake is held, so a gesture needing both at
+once can never fire. A brake tap arms it, the blips confirm it.
 
 The normal limits are read back from the VESC when the lock goes on and restored when it goes
 off, so nothing has to be configured twice. **If those values do not read back as sane positive
@@ -81,8 +86,8 @@ the lock. This also means a lock cannot be lost while the scooter is on.
 
 Two motors: the same limits are sent to the other VESCs found on the CAN bus with `can-cmd`; the
 line printed after each push says how many were found. That overwrites whatever those VESCs had,
-so they should be set up with the same limits as the master. The gesture needs the brake to be
-released before it fires again.
+so they should be set up with the same limits as the master. The scooter has to stand still, and
+the brake has to be released and tapped again before the gesture fires again.
 
 ## How it works
 The script watches the throttle voltage. While cruising it detaches ADC1 and overrides it with
