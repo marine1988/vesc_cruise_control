@@ -58,10 +58,11 @@
 ; that is easy to leave unconfigured. Either signal counts as a brake.
 (def brake-raw-on 1.5)  ; volts on the brake pin
 (def thr-min 0.10)     ; throttle below this is not riding
-(def blip-on 0.20)     ; a blip rises past this
-(def blip-off 0.10)    ; and back below this
-(def blips-needed 2)
-(def arm-window-ms 3000) ; how long the blips may take after the brake tap
+; The gesture is brake taps. The brake switch cuts the throttle signal, so the throttle cannot be
+; part of a gesture that happens while braking.
+(def taps-needed 5)
+(def tap-window-ms 5000)   ; the taps have to fit in this, counted from the first one
+(def tap-debounce-ms 80)   ; anything shorter than this is switch chatter, not a tap
 
 (def cruise-hz 50)
 (def cruise-kp 0.25)   ; volts per m/s
@@ -104,12 +105,9 @@
 (def legal false)
 (def legal-saved-speed 0.0)
 (def legal-saved-watt 0.0)
-(def legal-blips 0)
-(def legal-high false)
-; The brake switch cuts the throttle signal on this scooter, so a brake tap arms the gesture and
-; the blips come after it, on the released brake.
-(def legal-armed false)
-(def legal-arm-time 0)
+(def legal-taps 0)
+(def legal-tap-first 0)
+(def legal-tap-last 0)
 (def legal-brake-seen false)
 
 (defun read-setting (name)
@@ -386,60 +384,43 @@
             {
                 (var spd (get-speed))
                 (var brk (brake-pressed))
-                (var thr (get-adc-decoded 0))
+                (var now (systime))
 
-                ; a brake tap at a standstill with the throttle closed arms the gesture
-                (if (and (< spd stop-speed)
-                         brk
-                         (not legal-brake-seen)
-                         (< thr blip-off))
+                ; the lock is engaged and released parked, so the gesture only counts standing still
+                (if (>= spd stop-speed)
                     {
-                        (set 'legal-armed true)
-                        (set 'legal-arm-time (systime))
-                        (set 'legal-blips 0)
-                        (set 'legal-high false)
-                        (print "Legal gesture armed, blip the throttle twice")
+                        (set 'legal-taps 0)
+                        (set 'legal-brake-seen brk)
                     }
-                )
+                    {
+                        ; a burst that drags on is forgotten before a tap starts a new one
+                        (if (and (> legal-taps 0)
+                                 (> (- now legal-tap-first) (* tap-window-ms ticks-per-ms)))
+                            (set 'legal-taps 0)
+                        )
 
-                ; the window counts from the release, that is when the throttle works again
-                (if (and legal-armed (not brk) legal-brake-seen)
-                    (set 'legal-arm-time (systime))
-                )
-                (set 'legal-brake-seen brk)
+                        ; a rising edge on the brake is a tap, chatter is not
+                        (if (and brk
+                                 (not legal-brake-seen)
+                                 (> (- now legal-tap-last) (* tap-debounce-ms ticks-per-ms)))
+                            {
+                                (if (= legal-taps 0)
+                                    (set 'legal-tap-first now)
+                                )
+                                (set 'legal-tap-last now)
+                                (set 'legal-taps (+ legal-taps 1))
+                                (print (str-from-n legal-taps "Legal gesture, tap %d"))
+                            }
+                        )
+                        (set 'legal-brake-seen brk)
 
-                (if legal-armed
-                    (if (or (>= spd stop-speed)
-                            (> (- (systime) legal-arm-time) (* arm-window-ms ticks-per-ms)))
-                        { ; the window closed or the scooter rolled, forget it
-                            (set 'legal-armed false)
-                            (set 'legal-blips 0)
-                            (set 'legal-high false)
-                            (print "Legal gesture timed out")
-                        }
-                        {
-                            (if (> thr blip-on)
-                                (if (not legal-high)
-                                    {
-                                        (set 'legal-high true)
-                                        (set 'legal-blips (+ legal-blips 1))
-                                        (print (str-from-n legal-blips "Legal gesture, blip %d"))
-                                    }
-                                )
-                                (if (< thr blip-off)
-                                    (set 'legal-high false)
-                                )
-                            )
-                            (if (>= legal-blips blips-needed)
-                                {
-                                    (legal-toggle)
-                                    (set 'legal-armed false)
-                                    (set 'legal-blips 0)
-                                    (set 'legal-high false)
-                                }
-                            )
-                        }
-                    )
+                        (if (>= legal-taps taps-needed)
+                            {
+                                (set 'legal-taps 0)
+                                (legal-toggle)
+                            }
+                        )
+                    }
                 )
             }
             (if legal (legal-unlock)) ; the switch went off, give the limits back
@@ -647,8 +628,8 @@
             (sym-name last-cancel)
             " legal="
             (if legal-enabled "1" "0")
-            " blips="
-            (str-from-n legal-blips "%d")
+            " taps="
+            (str-from-n legal-taps "%d")
             " locked="
             (if legal "1" "0")
         ))
@@ -679,8 +660,8 @@
         (if legal "1" "0")
         " legal="
         (if legal-enabled "1" "0")
-        " blips="
-        (str-from-n legal-blips "%d")
+        " taps="
+        (str-from-n legal-taps "%d")
         " state="
         (sym-name cruise-state)
         " cancel="

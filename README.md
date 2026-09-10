@@ -55,10 +55,9 @@ not:
 - `brk` is the brake **pin** in volts, `brkD` the decoded brake and `brake` whether the script
   counts it as pressed. **Either signal counts**, so a brake switch works even when the ADC2
   mapping was never configured - which is what makes the pin worth watching.
-- `legal` is the gesture switch, `blips` how many blips it has counted, `locked` the lock itself.
-  The gesture prints its own lines: `Legal gesture armed` on the brake tap, `Legal gesture, blip N`
-  per blip, `Legal gesture timed out` when the window closed. A gesture that never arms is visible
-  at once.
+- `legal` is the gesture switch, `taps` how many brake taps it has counted, `locked` the lock
+  itself. Each tap prints `Legal gesture, tap N` on its own line, so a gesture that is not being
+  seen is visible at once.
 - `active` is the cruise, `lock` the legal lock, `state` is `off`/`engaging`/`on`/`cancelling`
   and `cancel` the reason the last cruise ended (`brake`, `throttle_moved`, `speed_low`,
   `overspeed`, `script_restart`).
@@ -69,14 +68,16 @@ While cruising, ADC1 is detached and overridden, so **the throttle pin and the i
 are different by design**: letting the throttle go moves `thr` back to rest and that is normal.
 
 ## Legal lock
-Stopped, tap the brake and then twist the throttle out twice within three seconds. The motor
-beeps twice and the speed is limited to 25 km/h and the power to 500 W. The same gesture gives
-the normal limits back, the motor beeps once. The tap, each blip and the limits that are about to
-be applied are printed on the terminal.
+Stopped, tap the brake five times within five seconds. The motor beeps twice and the speed is
+limited to 25 km/h and the power to 500 W. The same gesture gives the normal limits back, the
+motor beeps once. Each tap and the limits that are about to be applied are printed on the
+terminal.
 
-The blips come **after** the brake, never during it: on a scooter whose brake switch cuts the
-throttle signal the throttle pin reads zero while the brake is held, so a gesture needing both at
-once can never fire. A brake tap arms it, the blips confirm it.
+The gesture is brake taps only: on a scooter whose brake switch cuts the throttle signal the
+throttle pin reads zero while the brake is held, so the throttle cannot be part of it. Five taps
+are deliberate enough not to happen by accident, and the scooter has to stand still, so the lock
+is engaged and released parked. A burst that takes longer than the window is forgotten, so a tap
+after a pause starts a new count instead of finishing the old one.
 
 The normal limits are read back from the VESC when the lock goes on and restored when it goes
 off, so nothing has to be configured twice. **If those values do not read back as sane positive
