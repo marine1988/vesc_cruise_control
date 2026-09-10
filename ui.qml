@@ -22,7 +22,6 @@ Item {
     function getSettings() {
         loaded = false
         sendCode("(send-settings)")
-        sendCode("(send-state)") // the state is asked for, never pushed, see the note further down
     }
 
     function setReal(field, value, decimals) {
@@ -126,10 +125,16 @@ Item {
         onTriggered: sendCode("(send-settings)")
     }
 
-    // Nothing is polled and nothing is pushed. The script only answers when this page asks, because
-    // every packet it sends goes out the port that spoke last - and on a scooter with a display on
-    // the UART that port is the display, which then shows wrong speed and temperature. The state
-    // below is whatever it was when the page was last opened or saved.
+    // The script never pushes anything on its own, it answers. A reply leaves by the port that
+    // asked, and on a scooter with a display on the UART the port that spoke last is the display,
+    // so a script that talked unprompted is what made the display show wrong speed and temperature.
+    // Asking for the state keeps that traffic between VESC Tool and the script.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: loaded && !saving
+        onTriggered: sendCode("(send-state)")
+    }
 
     Connections {
         target: mCommands
@@ -151,6 +156,8 @@ Item {
             } else if (message === "err") {
                 saving = false
                 VescIf.emitStatusMessage("Saving failed.", false)
+            } else if (message === "state-poll") {
+                // The reply to the periodic state request: the state line next to it is the point
             } else if (message.indexOf("state ") === 0) {
                 applyStateLine(message)
             } else {

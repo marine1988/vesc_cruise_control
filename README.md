@@ -100,16 +100,8 @@ and temperature until the next good reply, and a 130 character line also holds t
 11 ms at 115200, which can push its replies past their timeout.
 
 That is why the script never talks on its own. It answers the App UI, and a reply leaves by the port
-that asked, so it reaches VESC Tool and not the display. The App UI does not poll either: it asks
-for the settings and the state when it opens, when it saves and when it is reset, and shows whatever
-came back. With a display installed keep **Debug off**, and turn it on only to diagnose, expecting
-the display to act up while it is on.
-
-**The beeps are not a buzzer.** `foc-play-tone` points the motor controller at an audio table and
-modulates the motor to make the sound, and it puts the controller into the running state when it was
-idle (`mcpwm_foc_play_tone`, `mcpwm_foc.c`). A beep can therefore appear on a display as a jump in
-speed or temperature. When a display misbehaves, first check whether what it gets wrong lines up
-with a beep: if it does, the beeps are the cause and they are the only thing to change.
+that asked, so it reaches VESC Tool and not the display. With a display installed keep **Debug
+off**, and turn it on only to diagnose, expecting the display to act up while it is on.
 
 If VESC Tool is connected over **USB** there is a target that is always safe: `send-data` takes an
 interface argument (`(send-data data 1)` goes to USB only, see `lispif_vesc_extensions.c`).
