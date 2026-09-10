@@ -53,7 +53,10 @@
 (def debug-enabled false)
 
 ; Decoded values are 0 to 1, 0 is released
-(def brake-on 0.10)
+(def brake-on 0.10)     ; decoded brake, 0 to 1
+; A switch brake pulls the pin high whatever the ADC2 mapping says, and the mapping is the part
+; that is easy to leave unconfigured. Either signal counts as a brake.
+(def brake-raw-on 1.5)  ; volts on the brake pin
 (def thr-min 0.10)     ; throttle below this is not riding
 (def blip-on 0.30)     ; a blip rises past this
 (def blip-off 0.10)    ; and back below this
@@ -366,14 +369,19 @@
     }
 )
 
+(defun brake-pressed ()
+    (or (> (get-adc-decoded 1) brake-on)
+        (> (get-adc 1) brake-raw-on)
+    )
+)
+
 (defun legal-gesture ()
     {
         (if legal-enabled
             {
-                (var brk (get-adc-decoded 1))
                 (var spd (get-speed))
 
-                (if (and (< spd stop-speed) (> brk brake-on))
+                (if (and (< spd stop-speed) (brake-pressed))
                     (if legal-done
                         nil
                         {
@@ -477,7 +485,7 @@
 )
 
 ; One cancel reason per tick, the first one that fires wins
-(defun cruise-reason (spd brk)
+(defun cruise-reason (spd brk-pressed)
     {
         (var reason 'none)
 
@@ -492,7 +500,7 @@
             (set 'cruise-low-start 0)
         )
 
-        (if (and (eq reason 'none) (> brk brake-on))
+        (if (and (eq reason 'none) brk-pressed)
             (setq reason 'brake)
         )
 
@@ -533,7 +541,7 @@
 (defun cruise-step ()
     {
         (var spd (get-speed))
-        (var brk (get-adc-decoded 1))
+        (var brk (brake-pressed))
 
         (if cruise-active
             {
@@ -554,7 +562,7 @@
                 (var thr (get-adc-decoded 0))
                 (var thr-volts (get-adc 0))
 
-                (if (and cruise-enabled (< brk brake-on) (> thr thr-min))
+                (if (and cruise-enabled (not brk) (> thr thr-min))
                     {
                         ; first valid sample of a hold, or the throttle moved: restart the count
                         (if (or (= cruise-hold-start 0)
@@ -600,7 +608,11 @@
             (str-from-n cruise-volts "%.3f")
             "V brk="
             (str-from-n (get-adc 1) "%.3f")
-            "V spd="
+            "V brkD="
+            (str-from-n (get-adc-decoded 1) "%.2f")
+            " brake="
+            (if (brake-pressed) "1" "0")
+            " spd="
             (str-from-n (* (get-speed) 3.6) "%.1f")
             "km/h state="
             (sym-name cruise-state)
@@ -608,6 +620,12 @@
             (str-from-n hold "%.1f")
             "s last_cancel="
             (sym-name last-cancel)
+            " legal="
+            (if legal-enabled "1" "0")
+            " blips="
+            (str-from-n legal-blips "%d")
+            " locked="
+            (if legal "1" "0")
         ))
     }
 )
@@ -634,6 +652,10 @@
         (if cruise-active "1" "0")
         " lock="
         (if legal "1" "0")
+        " legal="
+        (if legal-enabled "1" "0")
+        " blips="
+        (str-from-n legal-blips "%d")
         " state="
         (sym-name cruise-state)
         " cancel="

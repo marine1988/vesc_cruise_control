@@ -46,15 +46,18 @@ The script prints **one line per second** on the VESC Tool terminal (LispBM page
 not:
 
 ```
-[WATCH] thr=1.457V ref=1.450V inj=1.450V brk=0.050V brkD=0.00 spd=18.0km/h active=1 lock=0 state=on cancel=none
-```
-```
-[DEBUG] thr=1.457V ref=1.450V inj=1.642V brk=0.050V spd=17.6km/h state=on hold=0.0s last_cancel=none
+[WATCH] thr=1.457V ref=1.450V inj=1.450V brk=0.050V brkD=0.00 spd=18.0km/h active=1 lock=0 legal=1 blips=0 state=on cancel=none
+[DEBUG] thr=1.457V ref=1.450V inj=1.642V brk=0.050V brkD=0.00 brake=0 spd=17.6km/h state=on hold=0.0s last_cancel=none legal=1 blips=0 locked=0
 ```
 
 - `thr` is the throttle **pin** in volts, `inj` is the voltage the script is feeding the ADC app
-  while cruising (`ref` is the voltage the cruise holds, `brkD` the decoded brake the legal
-  gesture needs to see).
+  while cruising (`ref` is the voltage the cruise holds).
+- `brk` is the brake **pin** in volts, `brkD` the decoded brake and `brake` whether the script
+  counts it as pressed. **Either signal counts**, so a brake switch works even when the ADC2
+  mapping was never configured - which is what makes the pin worth watching.
+- `legal` is the gesture switch, `blips` how many blips it has counted, `locked` the lock itself.
+  A blip prints `Legal gesture, blip N` on its own line, so a gesture that never arms is visible
+  at once.
 - `active` is the cruise, `lock` the legal lock, `state` is `off`/`engaging`/`on`/`cancelling`
   and `cancel` the reason the last cruise ended (`brake`, `throttle_moved`, `speed_low`,
   `overspeed`, `script_restart`).
