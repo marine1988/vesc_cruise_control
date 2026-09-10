@@ -154,14 +154,6 @@
         (t "unknown")
 ))
 
-; Every line the script writes goes through here, and nothing is written unless the debug switch is
-; on. The LispBM print goes out the port that spoke last, and on a scooter with a display on the
-; UART that port is the display: a packet it did not ask for, once a second, is what makes it show
-; wrong speed and temperature. The boot lines in main are the exception, they run once per load.
-(defun dbg-print (s)
-    (if debug-enabled (print s))
-)
-
 (defun restore-defaults ()
     {
         (write-setting 'cruise-enabled true)
@@ -260,7 +252,6 @@
                                     (cond
                                         ((eq command 'save-cruise-settings) "saved")
                                         ((eq command 'send-settings) "loaded")
-                                        ((eq command 'send-state) "state-poll")
                                         ((eq command 'restore-settings-ui) "reset")
                                         (t "ack")
                                     )
@@ -338,7 +329,7 @@
         )
 
         ; One line per push: it says whether the other VESC on a two motor scooter was found at all
-        (dbg-print (str-merge
+        (print (str-merge
             (str-from-n speed "Limits %.4f m/s ")
             (str-from-n watt "%.1f W set on this VESC, VESCs on CAN: ")
             (str-from-n n "%d")
@@ -350,7 +341,7 @@
     {
         (apply-limits legal-saved-speed legal-saved-watt)
         (set 'legal false)
-        (dbg-print "Legal lock OFF")
+        (print "Legal lock OFF")
     }
 )
 
@@ -377,18 +368,18 @@
                     {
                         (set 'legal-saved-speed save-speed)
                         (set 'legal-saved-watt save-watt)
-                        (dbg-print (str-merge
+                        (print (str-merge
                             (str-from-n save-speed "Legal limits to restore: %.4f m/s, ")
                             (str-from-n save-watt "%.1f W")
                         ))
                         (apply-limits legal-speed legal-watt)
                         (set 'legal true)
                         (beeps 3)
-                        (dbg-print (str-from-n legal-speed-kmh "Legal lock ON - %.0f km/h"))
+                        (print (str-from-n legal-speed-kmh "Legal lock ON - %.0f km/h"))
                     }
                     {
                         ; never store a broken value: the restore would push it back
-                        (dbg-print (str-merge
+                        (print (str-merge
                             (str-from-n save-speed "Legal lock ABORTED - bad max-speed: %.4f m/s, ")
                             (str-from-n save-watt "l-watt-max: %.1f W")
                         ))
@@ -437,7 +428,7 @@
                                 )
                                 (set 'legal-tap-last now)
                                 (set 'legal-taps (+ legal-taps 1))
-                                (dbg-print (str-from-n legal-taps "Legal gesture, tap %d"))
+                                (print (str-from-n legal-taps "Legal gesture, tap %d"))
                             }
                         )
                         (set 'legal-brake-seen brk)
@@ -472,7 +463,7 @@
         (set 'last-cancel reason)
         (set 'cruise-state 'cancelling)
         (set 'cruise-state-time (systime))
-        (dbg-print (str-merge "Cruise OFF - " (sym-name reason)))
+        (print (str-merge "Cruise OFF - " (sym-name reason)))
         (beeps 2)
     }
 )
@@ -491,7 +482,7 @@
         (set 'cruise-active true)
         (set 'cruise-state 'on)
         (set 'cruise-state-time (systime))
-        (dbg-print (str-from-n (* cruise-target 3.6) "Cruise ON - %.1f km/h"))
+        (print (str-from-n (* cruise-target 3.6) "Cruise ON - %.1f km/h"))
         (tone 2500 500) ; one long beep, and it does not block the override
     }
 )
@@ -625,9 +616,6 @@
     }
 )
 
-; thr is the physical pin and inj is the voltage the script is feeding the ADC app: while cruising
-; they are different by design, and inj is the one the app uses. brkD is the decoded brake, the
-; value the legal gesture needs to see.
 (defun debug-print ()
     {
         (var hold 0.0)
@@ -635,7 +623,7 @@
             (setq hold (/ (- (systime) cruise-hold-start) ticks-per-sec))
         )
 
-        (dbg-print (str-merge
+        (print (str-merge
             "[DEBUG] thr="
             (str-from-n (get-adc 0) "%.3f")
             "V ref="
@@ -666,6 +654,39 @@
     }
 )
 
+; One line per second even with the debug switch off, so a ride can be read back from the
+; terminal without turning anything on. thr is the physical pin and inj is the voltage the
+; script is feeding the ADC app: while cruising they are different by design, and inj is the
+; one the app uses. brkD is the decoded brake, the value the legal gesture needs to see.
+(defun watch-print ()
+    (print (str-merge
+        "[WATCH] thr="
+        (str-from-n (get-adc 0) "%.3f")
+        "V ref="
+        (str-from-n cruise-thr-ref "%.3f")
+        "V inj="
+        (str-from-n cruise-volts "%.3f")
+        "V brk="
+        (str-from-n (get-adc 1) "%.3f")
+        "V brkD="
+        (str-from-n (get-adc-decoded 1) "%.2f")
+        " spd="
+        (str-from-n (* (get-speed) 3.6) "%.1f")
+        "km/h active="
+        (if cruise-active "1" "0")
+        " lock="
+        (if legal "1" "0")
+        " legal="
+        (if legal-enabled "1" "0")
+        " taps="
+        (str-from-n legal-taps "%d")
+        " state="
+        (sym-name cruise-state)
+        " cancel="
+        (sym-name last-cancel)
+    ))
+)
+
 (defun control-loop ()
     (loopwhile t
         {
@@ -677,10 +698,8 @@
             (if (>= loop-counter debug-divider)
                 {
                     (set 'loop-counter 0)
-                    ; Nothing goes out unless the debug switch is on. The UI asks for the state
-                    ; itself: a reply leaves by the port that asked, so it reaches VESC Tool and
-                    ; never the display polling the same UART.
-                    (if debug-enabled (debug-print))
+                    (if debug-enabled (debug-print) (watch-print))
+                    (send-state) ; one state message per second, the UI shows it at the bottom
                 }
             )
 
@@ -695,9 +714,6 @@
         (set 'last-cancel 'script_restart) ; the image was just loaded, any cruise that was on is gone
 
         (var ctrl-type (conf-get 'adc-ctrl-type))
-        ; These two print whatever the debug switch says: they are the only sign that the script
-        ; loaded at all, and a wrong ADC control type means cruise silently does nothing. Both run
-        ; once, at load, so they are not the traffic that troubles a display.
         (print (str-from-n ctrl-type "ADC control type: %d"))
         (if (or (= ctrl-type 0) (>= ctrl-type 12))
             (print "Cruise control needs a current or duty control type in the ADC app")
@@ -711,15 +727,14 @@
             (if legal-enabled "on" "off")
             " debug "
             (if debug-enabled "on" "off")
-            ", debug lines on this terminal"
+            ", one line per second on this terminal"
         ))
 
         (event-register-handler (spawn event-handler))
         (event-enable 'event-data-rx)
 
-        ; Nothing is sent from here: the UI asks for the settings and for the state when it opens
-        ; and while it is open, and those replies leave by the port that asked. A script that talks
-        ; unprompted talks to whatever spoke last, which on a UART display is the display.
+        (send-settings)
+        (send-state)
 
         (control-loop) ; blocks the main thread
 })
