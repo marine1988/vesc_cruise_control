@@ -137,6 +137,32 @@ the motor instead of leaving it running at a fixed speed.
 **Important:** ADC1 stays detached after canceling cruise, so the throttle works again only
 after the script reattaches it. The script reattaches on cancel and on start-up.
 
+## Display on the UART (observations)
+A display on the UART (Davega style) was reported to show wrong speed and temperature while this
+package was installed, and only with this package. Two things in the package reach that display's
+world, both read off the firmware source:
+
+1. **`print` and `send-data` have no fixed target.** `commands_process_packet` sets
+   `send_func = reply_func` for every packet it receives, and the UART app registers its own port as
+   the reply function, so with a display polling on that UART the script's output goes out to the
+   display as packets it never asked for.
+2. **A beep is not a buzzer.** `foc-play-tone` points the controller at an audio table and modulates
+   the motor to make the sound, and `mcpwm_foc_play_tone` (`mcpwm_foc.c`) puts the controller into
+   the running state when it was idle. A beep can therefore appear as a jump in speed or
+   temperature.
+
+The code here is back at the behaviour of version 1.6, where both were left as they are: one log
+line per second plus one state packet per second, and beeps at every event. The changes that would
+have silenced both (a debug-gated log, no state push, the App UI asking for the state, no tag
+packet) were reverted: they did not demonstrably help, and one of them made it worse.
+
+What to try next, one at a time so each can be told apart:
+- **The beeps.** Shorten the tone (150 ms to 250 ms), drop its voltage, or put them behind a switch,
+  and see whether what the display gets wrong lines up with a beep.
+- **A log line only with Debug on.** Then with Debug off the script sends nothing per second.
+- **`send-data` with an interface.** `(send-data data 1)` goes out USB only
+  (`lispif_vesc_extensions.c`), which a display on the UART never sees.
+
 ## Notes for changes
 - The App UI is in English.
 - Beeps: one long when cruise engages, two short when it cancels, three short when the legal lock
