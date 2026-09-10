@@ -251,18 +251,25 @@
         (recv
             ((event-data-rx . (? data))
                 (let ((parsed (trap (read data))))
-                    (send-data
-                        (if (eq (car parsed) 'exit-error)
-                            "err"
-                            (let ((command (car (second parsed))))
-                                (if (eq (car (trap (eval (second parsed)))) 'exit-error)
-                                    "err"
-                                    (cond
-                                        ((eq command 'save-cruise-settings) "saved")
-                                        ((eq command 'send-settings) "loaded")
-                                        ((eq command 'send-state) "state-poll")
-                                        ((eq command 'restore-settings-ui) "reset")
-                                        (t "ack")
+                    (if (eq (car parsed) 'exit-error)
+                        (send-data "err")
+                        (let ((command (car (second parsed))))
+                            (let ((failed (eq (car (trap (eval (second parsed)))) 'exit-error)))
+                                ; (send-state) answers with the state line itself. A tag on top of it
+                                ; would be a second packet, and every packet the script sends can end
+                                ; up on a display that polls the same UART.
+                                (if (eq command 'send-state)
+                                    (if failed (send-data "err"))
+                                    (send-data
+                                        (if failed
+                                            "err"
+                                            (cond
+                                                ((eq command 'save-cruise-settings) "saved")
+                                                ((eq command 'send-settings) "loaded")
+                                                ((eq command 'restore-settings-ui) "reset")
+                                                (t "ack")
+                                            )
+                                        )
                                     )
                                 )
                             )
