@@ -1,7 +1,7 @@
 # VESC Cruise Control
 Cruise control and a legal lock for a VESC without a display. Hold the throttle steady for the
-hold time and the scooter keeps the speed, brake or move the throttle to cancel it. Stopped
-with the brake held, two throttle blips limit speed and power for riding where that is required.
+hold time and the scooter keeps the speed, brake or move the throttle to cancel it. Stopped, five
+brake taps limit speed and power for riding where that is required.
 
 Settings are made in the App UI and stored in the VESC, so nothing has to be reflashed when
 they change.
@@ -46,8 +46,8 @@ The script prints **one line per second** on the VESC Tool terminal (LispBM page
 not:
 
 ```
-[WATCH] thr=1.457V ref=1.450V inj=1.450V brk=0.050V brkD=0.00 spd=18.0km/h active=1 lock=0 legal=1 blips=0 state=on cancel=none
-[DEBUG] thr=1.457V ref=1.450V inj=1.642V brk=0.050V brkD=0.00 brake=0 spd=17.6km/h state=on hold=0.0s last_cancel=none legal=1 blips=0 locked=0
+[WATCH] thr=1.457V ref=1.450V inj=1.450V brk=0.050V brkD=0.00 spd=18.0km/h active=1 lock=0 legal=1 taps=0 state=on cancel=none
+[DEBUG] thr=1.457V ref=1.450V inj=1.642V brk=0.050V brkD=0.00 brake=0 spd=17.6km/h state=on hold=0.0s last_cancel=none legal=1 taps=0 locked=0
 ```
 
 - `thr` is the throttle **pin** in volts, `inj` is the voltage the script is feeding the ADC app

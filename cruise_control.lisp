@@ -4,8 +4,8 @@
 ; while cruising: the ADC is overridden there, so the physical pin dropping back to rest is the
 ; rider handing the speed over, not a request to stop.
 ;
-; Legal lock: stopped, brake held, two throttle blips limit the speed to 25 km/h and the power
-; to 500 W. It lasts until the scooter is switched off, nothing is written to flash and the
+; Legal lock: stopped, five brake taps inside five seconds limit the speed to 25 km/h and the
+; power to 500 W. It lasts until the scooter is switched off, nothing is written to flash and the
 ; limits are pushed to the other VESCs on the CAN bus. The limits that were in the VESC are read
 ; back before locking and put back on unlocking; if they read as a broken value the lock refuses
 ; to engage rather than storing it.
