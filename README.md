@@ -175,6 +175,11 @@ What to try next, one at a time so each can be told apart:
   does not count as taps; a burst that runs past its window is dropped rather than completed.
 
 ## Status
-The LispBM, the settings round trip and the package build are tested. The behaviour on a real
-scooter is not, so start with a low **Min Speed** and a high **Max Speed** and try it at low
-speed first.
+The LispBM, the settings round trip and the package build are tested. Version 1.6 runs on the
+scooter and the cruise control works there: it takes over in the speed range it should, it lets go
+when the brake is used, and the beeps are heard. The legal lock gesture and the display notes above
+are still to be confirmed on the road.
+
+Start with a low **Min Speed** and a high **Max Speed** and try it at low speed first.
+
+Releases carry the built package: <https://github.com/marine1988/vesc_cruise_control/releases>
