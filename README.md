@@ -58,42 +58,59 @@ pulled, the signal is not reaching the VESC and no change to the script will hel
 - **Min Speed (km/h)**: cruise does not engage below this speed
 - **Max Speed (km/h)**: cruise does not engage above this speed. If the speed passes it while cruising, cruise is cancelled after 3 seconds
 - **Legal Lock**: turns the legal lock gesture on or off. The speed and the power it applies are fixed at 25 km/h and 500 W
-- **Debug**: prints the longer line per second on the VESC Tool terminal while the script runs
+- **Debug**: prints a line per second and a line per event (tap, cruise on and off, limits applied)
+  on the VESC Tool terminal. **Leave it off on a scooter with a display wired to the UART**, see
+  below
 
 The state of the cruise is shown at the bottom of the app UI, together with the reason the last
 cruise ended.
 
 ## Log
-The script prints **one line per second** on the VESC Tool terminal (LispBM page), debug switch or
-not:
+With **Debug on** the script prints one line per second on the VESC Tool terminal (LispBM page),
+plus a line per event:
 
 ```
-[WATCH] thr=1.457V ref=1.450V inj=1.450V brk=0.050V brkD=0.00 spd=18.0km/h active=1 lock=0 legal=1 taps=0 state=on cancel=none
 [DEBUG] thr=1.457V ref=1.450V inj=1.642V brk=0.050V brkD=0.00 brake=0 spd=17.6km/h state=on hold=0.0s last_cancel=none legal=1 taps=0 locked=0
 ```
 
-- `thr` is the throttle **pin** in volts, `inj` is the voltage the script is feeding the ADC app
-  while cruising (`ref` is the voltage the cruise holds).
+- `thr` is the throttle **pin** in volts, `inj` the voltage the script is feeding the ADC app while
+  cruising (`ref` is the voltage the cruise holds).
 - `brk` is the brake **pin** in volts, `brkD` the decoded brake and `brake` whether the script
   counts it as pressed. **Either signal counts**, so a brake switch works even when the ADC2
   mapping was never configured - which is what makes the pin worth watching.
 - `legal` is the gesture switch, `taps` how many brake taps it has counted, `locked` the lock
   itself. Each tap prints `Legal gesture, tap N` on its own line, so a gesture that is not being
   seen is visible at once.
-- `active` is the cruise, `lock` the legal lock, `state` is `off`/`engaging`/`on`/`cancelling`
-  and `cancel` the reason the last cruise ended (`brake`, `throttle_moved`, `speed_low`,
-  `overspeed`, `script_restart`).
-- The startup line says which switches the script was given: `Settings: cruise on legal gesture on
-  debug off, one line per second on this terminal`.
+- `state` is `off`/`engaging`/`on`/`cancelling` and `last_cancel` the reason the last cruise ended
+  (`brake`, `throttle_moved`, `speed_low`, `overspeed`, `script_restart`).
+- With **Debug off** the script prints nothing, except at load: the ADC control type, a warning
+  when that control type cannot drive the motor, and the switches it was given, for example
+  `Settings: cruise on legal gesture on debug off, debug lines on this terminal`.
 
 While cruising, ADC1 is detached and overridden, so **the throttle pin and the injected voltage
 are different by design**: letting the throttle go moves `thr` back to rest and that is normal.
 
+## Displays on the UART
+A display (Davega style) polls the VESC over the UART and expects a reply to what it asks. LispBM's
+`print` and `send-data` have **no fixed target**: the firmware sends them to the port that spoke
+last - `commands_process_packet` sets `send_func = reply_func` for every packet it receives - and a
+display that polls constantly is that port. Anything the script prints or sends unprompted goes out
+**to the display**, as packets it never asked for. A display that mis-parses those shows wrong speed
+and temperature until the next good reply, and a 130 character line also holds the UART for about
+11 ms at 115200, which can push its replies past their timeout.
+
+That is why the script never talks on its own. It answers the App UI, and a reply leaves by the port
+that asked, so it reaches VESC Tool and not the display. With a display installed keep **Debug
+off**, and turn it on only to diagnose, expecting the display to act up while it is on.
+
+If VESC Tool is connected over **USB** there is a target that is always safe: `send-data` takes an
+interface argument (`(send-data data 1)` goes to USB only, see `lispif_vesc_extensions.c`).
+
 ## Legal lock
 Stopped, tap the brake five times within five seconds. The motor beeps three times and the speed
 is limited to 25 km/h and the power to 500 W. The same gesture gives the normal limits back, the
-motor beeps once. Each tap and the limits that are about to be applied are printed on the
-terminal.
+motor beeps once. Each tap and the limits that are about to be applied are printed on the terminal
+with **Debug** on.
 
 The gesture is brake taps only: on a scooter whose brake switch cuts the throttle signal the
 throttle pin reads zero while the brake is held, so the throttle cannot be part of it. Five taps
@@ -139,6 +156,9 @@ after the script reattaches it. The script reattaches on cancel and on start-up.
 
 ## Notes for changes
 - The App UI is in English.
+- **The script never talks unprompted.** `print` and `send-data` go out the port that spoke last, so
+  anything pushed on its own reaches a display on the UART as a packet it did not ask for. Send only
+  in reply to the UI, or with `send-data`'s interface argument (1 = USB).
 - Beeps: one long when cruise engages, two short when it cancels, three short when the legal lock
   engages, one short when it releases, four short when it refuses. **No beep is slept through while
   cruise holds the speed**: the ADC1 override has to keep being sent, and half a second of sleep
