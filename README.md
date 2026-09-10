@@ -29,6 +29,28 @@ keep the slave without an app. The master sends the same command to the slave ov
 Throttle to ADC1, brake to ADC2 of the VESC, both against GND. The values below are in volts
 on those pins.
 
+## Brake and throttle at the same time
+**The brake switch cuts the throttle signal.** With the brake held the throttle pin reads about
+0.01 V even with the grip fully open, and with the brake released the same grip reads about 3.24 V:
+
+```
+[DEBUG] thr=0.012V ref=0.000V inj=0.609V brk=3.254V spd=-0.0km/h state=off hold=0.0s last_cancel=throttle_moved
+[DEBUG] thr=3.243V ref=3.247V inj=0.609V brk=0.001V spd=20.5km/h state=engaging hold=0.1s last_cancel=throttle_moved
+```
+
+`thr` is read straight off ADC1, so that is the signal collapsing **at the pin**, not something the
+script does. Whatever the scooter's wiring and controller do to the throttle line while the brake
+is pulled, the throttle cannot be read at the same time as the brake. What follows from it:
+
+- **A gesture that has to read the throttle while the brake is held can never fire.** The legal
+  lock is five brake taps for that reason, and not brake plus throttle blips.
+- **The brake is counted from its pin as well as from the ADC2 mapping**, so the script still sees
+  it when the mapping was never configured - otherwise cruise would not cancel on a brake either.
+
+To tell a brake that is not wired from a script that is not running, look at those two fields: with
+the brake held `brk` goes to about 3 V and `brake` reads 1. If `brake` stays 0 with the lever
+pulled, the signal is not reaching the VESC and no change to the script will help.
+
 ## Settings
 - **Cruise Control**: turns the cruise control on or off
 - **Hold Time (s)**: how long the throttle has to stay steady before cruise engages
@@ -114,6 +136,17 @@ the motor instead of leaving it running at a fixed speed.
 
 **Important:** ADC1 stays detached after canceling cruise, so the throttle works again only
 after the script reattaches it. The script reattaches on cancel and on start-up.
+
+## Notes for changes
+- The App UI is in English.
+- Beeps: one long when cruise engages, two short when it cancels, three short when the legal lock
+  engages, one short when it releases, four short when it refuses. **No beep is slept through while
+  cruise holds the speed**: the ADC1 override has to keep being sent, and half a second of sleep
+  would let the timeout stop the motor. `tone` starts a beep and `tone-service` stops it from the
+  control loop.
+- Gestures have to work with the brake alone, see above.
+- The gesture fires on a **rising edge** of the brake with an 80 ms debounce, so switch chatter
+  does not count as taps; a burst that runs past its window is dropped rather than completed.
 
 ## Status
 The LispBM, the settings round trip and the package build are tested. The behaviour on a real
