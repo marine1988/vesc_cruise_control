@@ -130,7 +130,7 @@ jobs:
         with:
           name: vesc-cruise-control-${{ github.sha }}
           if-no-files-found: error
-          path: vesc_cruise_control.vescpkg
+          path: vesc_cruise_control_v*.vescpkg
 
       - name: Attach package to release
         if: github.event_name == 'release'
@@ -138,4 +138,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            vesc_cruise_control.vescpkg --clobber
+            vesc_cruise_control_v*.vescpkg --clobber
