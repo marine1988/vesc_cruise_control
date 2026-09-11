@@ -9,8 +9,9 @@ switch). Versions 1.7 and 1.8 were attempts at the display problem that were rev
 The beeps are a setting now. **Beeps** in the UI turns them off, and it is on by default, so nothing
 changes for anyone who does not touch it.
 
-- New EEPROM field `beeps-enabled` at offset 8, `settings-version` 102 → 103. Offsets 0-7 are
-  untouched, so existing settings stay where they are; only the new field comes back at its default.
+- New EEPROM field `beeps-enabled` at offset 8, `settings-version` 102 → 103. Nothing moved: offsets
+  0-7 still hold what they held. As with every version bump, the first start after the update runs
+  `restore-defaults` once, so the settings go back to what the package ships with.
 - `beep` and `tone` check the switch. Off means no `foc-play-tone` at all: the tone is never started
   and `tone-stop` stays 0, so nothing is left armed for the control loop to stop.
 - Checked on the LispBM REPL with the hardware stubbed: switch on, `beep` + `tone` gives 2 calls to
