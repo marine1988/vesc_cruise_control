@@ -1,9 +1,23 @@
 # Changelog
 
 Only the versions meant to be installed have a release with the built package attached: **1.6**
-(the one on the scooter) and **1.10** (the same behaviour, this documentation). Versions 1.7 and
-1.8 were attempts at the display problem that were reverted, and 1.0 to 1.5 are the steps that led
-up to 1.6.
+(the one on the scooter), **1.10** (the same behaviour, this documentation) and **1.11** (the beeps
+switch). Versions 1.7 and 1.8 were attempts at the display problem that were reverted, and 1.0 to
+1.5 are the steps that led up to 1.6.
+
+## 1.11 — released
+The beeps are a setting now. **Beeps** in the UI turns them off, and it is on by default, so nothing
+changes for anyone who does not touch it.
+
+- New EEPROM field `beeps-enabled` at offset 8, `settings-version` 102 → 103. Offsets 0-7 are
+  untouched, so existing settings stay where they are; only the new field comes back at its default.
+- `beep` and `tone` check the switch. Off means no `foc-play-tone` at all: the tone is never started
+  and `tone-stop` stays 0, so nothing is left armed for the control loop to stop.
+- Checked on the LispBM REPL with the hardware stubbed: switch on, `beep` + `tone` gives 2 calls to
+  `foc-play-tone`; switch off gives 0 calls and `tone-stop = 0`.
+- The settings line gained a field (`cruise <enabled> <hold> <deadband> <min> <max> <legal> <debug>
+  <beeps>`, 9 tokens). The line was read back out of the real `send-settings` to confirm the tokens
+  come out in the order the UI reads them.
 
 ## 1.10 — released
 Same script and UI as 1.6 and 1.9. The README now says that 1.6 runs on the scooter and the cruise

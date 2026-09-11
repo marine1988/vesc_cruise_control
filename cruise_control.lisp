@@ -20,7 +20,7 @@
 
 @const-start
 
-(def settings-version 102i32)
+(def settings-version 103i32)
 
 ; Persistent settings: (label . (eeprom-offset type))
 ; Offsets 6 and 7 used to hold the legal speed and power, they are now the legal lock and the
@@ -34,6 +34,7 @@
     (cruise-max-speed-kmh . (5 f))
     (legal-enabled        . (6 b))
     (debug-enabled        . (7 b))
+    (beeps-enabled        . (8 b))
 ))
 
 ; Cruise control
@@ -51,6 +52,7 @@
 ; Switches that come from the settings
 (def legal-enabled false)
 (def debug-enabled false)
+(def beeps-enabled true)
 
 ; Decoded values are 0 to 1, 0 is released
 (def brake-on 0.10)     ; decoded brake, 0 to 1
@@ -163,6 +165,7 @@
         (write-setting 'cruise-max-speed-kmh 25.0)
         (write-setting 'legal-enabled false)
         (write-setting 'debug-enabled false)
+        (write-setting 'beeps-enabled true)
         (write-setting 'ver-code settings-version)
     }
 )
@@ -180,6 +183,7 @@
         (set 'cruise-max-speed (/ (read-setting 'cruise-max-speed-kmh) 3.6))
         (set 'legal-enabled (read-setting 'legal-enabled))
         (set 'debug-enabled (read-setting 'debug-enabled))
+        (set 'beeps-enabled (read-setting 'beeps-enabled))
     }
 )
 
@@ -194,7 +198,8 @@
             (str-from-n (read-setting 'cruise-min-speed-kmh) "%.1f ")
             (str-from-n (read-setting 'cruise-max-speed-kmh) "%.1f ")
             (if (read-setting 'legal-enabled) "true " "false ")
-            (if (read-setting 'debug-enabled) "true" "false")
+            (if (read-setting 'debug-enabled) "true " "false ")
+            (if (read-setting 'beeps-enabled) "true" "false")
         ))
     }
 )
@@ -210,7 +215,7 @@
     }
 )
 
-(defun save-cruise-settings (enabled hold-sec deadband min-speed-kmh max-speed-kmh legal-on debug-on)
+(defun save-cruise-settings (enabled hold-sec deadband min-speed-kmh max-speed-kmh legal-on debug-on beeps-on)
     {
         (write-setting 'cruise-enabled enabled)
         (write-setting 'cruise-hold-sec hold-sec)
@@ -219,6 +224,7 @@
         (write-setting 'cruise-max-speed-kmh max-speed-kmh)
         (write-setting 'legal-enabled legal-on)
         (write-setting 'debug-enabled debug-on)
+        (write-setting 'beeps-enabled beeps-on)
         (load-settings)
         (send-settings)
         (send-state)
@@ -269,10 +275,14 @@
 ; while ADC1 is detached: there the override has to keep coming or the timeout stops the motor.
 (defun beep ()
     {
-        (foc-play-tone 0 2500 24.0)
-        (sleep 0.15)
-        (foc-play-stop)
-        (sleep 0.1)
+        (if beeps-enabled
+            {
+                (foc-play-tone 0 2500 24.0)
+                (sleep 0.15)
+                (foc-play-stop)
+                (sleep 0.1)
+            }
+        )
     }
 )
 
@@ -283,8 +293,12 @@
 ; The long beep is started and left running, the control loop stops it. Nothing blocks here.
 (defun tone (freq ms)
     {
-        (foc-play-tone 0 freq 24.0)
-        (set 'tone-stop (+ (systime) (* ms ticks-per-ms)))
+        (if beeps-enabled
+            {
+                (foc-play-tone 0 freq 24.0)
+                (set 'tone-stop (+ (systime) (* ms ticks-per-ms)))
+            }
+        )
     }
 )
 

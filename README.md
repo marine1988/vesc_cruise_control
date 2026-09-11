@@ -58,6 +58,7 @@ pulled, the signal is not reaching the VESC and no change to the script will hel
 - **Min Speed (km/h)**: cruise does not engage below this speed
 - **Max Speed (km/h)**: cruise does not engage above this speed. If the speed passes it while cruising, cruise is cancelled after 3 seconds
 - **Legal Lock**: turns the legal lock gesture on or off. The speed and the power it applies are fixed at 25 km/h and 500 W
+- **Beeps**: turns the beeps on or off. One long beep when cruise engages, two short when it cancels. Off means silence from this package, not from the dash
 - **Debug**: prints the longer line per second on the VESC Tool terminal while the script runs
 
 The state of the cruise is shown at the bottom of the app UI, together with the reason the last
@@ -120,6 +121,9 @@ the brake has to be released and tapped again before the gesture fires again.
 | Legal lock engages | three short |
 | Legal lock releases | one short |
 | Legal lock refused | four short |
+
+Every one of them is behind the **Beeps** switch in the settings, which is on by default. Off means
+silence from this package: the dash and the scooter keep their own sounds.
 
 The long beep is started by the loop and stopped by it a moment later rather than slept through:
 while cruise holds the speed the ADC1 override has to keep being sent, and sleeping through a

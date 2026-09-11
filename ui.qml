@@ -39,11 +39,11 @@ Item {
         return number.toFixed(decimals)
     }
 
-    // cruise <enabled> <hold> <deadband> <min km/h> <max km/h> <legal> <debug>
+    // cruise <enabled> <hold> <deadband> <min km/h> <max km/h> <legal> <debug> <beeps>
     function applySettingsLine(line) {
         var parts = line.split(" ")
 
-        if (parts[0] !== "cruise" || parts.length < 8) {
+        if (parts[0] !== "cruise" || parts.length < 9) {
             return
         }
 
@@ -54,6 +54,7 @@ Item {
         setReal(cruiseMaxSpeed, parts[5], 1)
         legalEnabled.checked = parts[6] === "true"
         debugEnabled.checked = parts[7] === "true"
+        beepsEnabled.checked = parts[8] === "true"
         loaded = true
     }
 
@@ -110,6 +111,7 @@ Item {
             + " " + readReal(cruiseMaxSpeed, 1)
             + " " + (legalEnabled.checked ? "true" : "false")
             + " " + (debugEnabled.checked ? "true" : "false")
+            + " " + (beepsEnabled.checked ? "true" : "false")
             + ")")
     }
 
@@ -325,6 +327,28 @@ Item {
                     font.pixelSize: 11
                     color: legalLocked ? "#e67e22" : "#95a5a6"
                     text: legalLocked ? "Locked: 25 km/h / 500 W" : "Unlocked"
+                }
+
+                Label {
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 2
+                    font.bold: true
+                    text: "Beeps"
+                }
+
+                CheckBox {
+                    id: beepsEnabled
+                    text: "Enable Beeps"
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 12
+                    Layout.bottomMargin: 4
+                    wrapMode: Text.WordWrap
+                    opacity: 0.65
+                    font.pixelSize: 11
+                    text: "One long beep when the cruise takes over, two short when it lets go. Off means silence from this package."
                 }
 
                 Label {
